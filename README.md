@@ -1,0 +1,115 @@
+# Flow
+
+A terminal-based multi-workspace manager built with Rust.
+
+## Features
+
+- **Multi-workspace management** with Git integration — branch tracking, status monitoring, and inline diffs
+- **Embedded terminal sessions** (agent + shell tabs) via PTY, with full input passthrough
+- **Attention system** that detects prompts, errors, and activity in terminal output
+- **Session persistence** with a daemon/attach model for long-running workspaces
+- **Web UI** with real-time WebSocket updates, served from an embedded HTTP server
+- **Mouse support** and terminal scrollback via mouse wheel
+- **Vim-style navigation** throughout the interface
+
+## Architecture
+
+Flow is organized as a Cargo workspace with four crates and a web frontend:
+
+| Crate | Description |
+|---|---|
+| `protocol` | Serializable types for IPC — workspace routing, attention levels, terminal kinds, and command/event enums |
+| `core` | Application state management — workspaces, Git, terminal PTY spawning, attention detection, and async event loop |
+| `tui` | Terminal UI built with Ratatui — renders home/workspace screens, handles input, manages sessions |
+| `server` | HTTP/WebSocket server — REST endpoints, WebSocket event streaming, and embedded web app hosting |
+
+The `web/` directory contains a lightweight browser frontend (`index.html` + `app.js`) served by the `server` crate.
+
+## Getting Started
+
+### Prerequisites
+
+- [Rust toolchain](https://rustup.rs/) (stable)
+
+### Build
+
+```sh
+cargo build --release
+```
+
+### Run
+
+```sh
+cargo run
+# or
+./target/release/flow
+```
+
+## Usage
+
+```
+flow                    Local mode (no session)
+flow -s <name>          Create and start a named session
+flow -a <name>          Attach to an existing session
+flow -l                 List sessions
+flow -r <name>          Remove a session
+flow -d                 Detach (use with -s or -a)
+```
+
+## Key Bindings
+
+### Global
+
+| Key | Action |
+|---|---|
+| `q` | Quit |
+| `Tab` / `Shift+Tab` | Cycle focus between sections |
+| `Esc` | Exit focused section / go back |
+
+### Home Screen
+
+| Key | Action |
+|---|---|
+| `h` `j` `k` `l` / Arrow keys | Navigate workspaces |
+| `Enter` | Open selected workspace |
+| `n` | New workspace |
+| `D` | Delete workspace |
+| `!` | Toggle attention level |
+| `g` | Refresh git status |
+
+### Workspace Screen
+
+| Key | Action |
+|---|---|
+| `1` `2` / `h` `l` | Switch terminal tabs |
+| `n` | New shell tab |
+| `x` | Close active tab |
+| `r` | Rename tab |
+| `a` / `A` | Start / stop agent terminal |
+| `s` / `S` | Start / stop shell terminal |
+| `g` | Refresh git |
+| `j` `k` / Arrow keys | Navigate file list |
+| `Enter` | Show diff for selected file |
+| Mouse wheel | Scroll terminal output |
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `MULTIWS_WEB_PORT` | Embedded web server port | `3001` |
+| `MULTIWS_DISABLE_EMBEDDED_WEB` | Disable the embedded web server if set | — |
+| `SHELL` | Shell used for terminal sessions | `zsh` |
+
+### Config Paths
+
+Flow stores configuration under `~/.config/multiws/` (respects `XDG_CONFIG_HOME`):
+
+- `sessions.json` — session registry
+- `workspaces.json` — default workspace persistence
+- `workspaces.<session-name>.json` — per-session workspace state
+
+## License
+
+MIT

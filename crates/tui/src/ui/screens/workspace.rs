@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
@@ -219,6 +219,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let terminal_lines = ws_id
         .map(|id| app.terminal_lines(id, &app.active_tab_id()))
         .unwrap_or_else(|| vec![Line::from("No terminal output yet.")]);
+    frame.render_widget(Clear, l.terminal_pane);
     frame.render_widget(
         Paragraph::new(terminal_lines).block(
             Block::default()

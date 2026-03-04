@@ -98,7 +98,7 @@ impl TuiApp {
     pub fn open_workspace(&mut self, id: WorkspaceId) {
         self.persist_tabs_for_active_workspace();
         self.route = Route::Workspace { id };
-        self.focus = Focus::WsTerminalTabs;
+        self.focus = Focus::WsTerminal;
         self.load_tabs_for_workspace(id);
     }
 
@@ -319,7 +319,7 @@ impl TuiApp {
             .terminal_state
             .entry(id)
             .or_insert_with(WorkspaceTerminalState::new);
-        state.parser_mut(tab_id).process(bytes);
+        state.tab_mut(tab_id).append_bytes(bytes);
     }
 
     pub fn reset_terminal(&mut self, id: WorkspaceId, tab_id: &str) {
@@ -327,7 +327,7 @@ impl TuiApp {
             .terminal_state
             .entry(id)
             .or_insert_with(WorkspaceTerminalState::new);
-        state.tabs.insert(tab_id.to_string(), make_parser());
+        state.tab_mut(tab_id).reset();
     }
 
     pub fn resize_terminal_parser(&mut self, id: WorkspaceId, tab_id: &str, cols: u16, rows: u16) {
@@ -335,9 +335,7 @@ impl TuiApp {
             .terminal_state
             .entry(id)
             .or_insert_with(WorkspaceTerminalState::new);
-        let cols = cols.max(1);
-        let rows = rows.max(1);
-        state.parser_mut(tab_id).set_size(rows, cols);
+        state.tab_mut(tab_id).rebuild_for_size(cols, rows);
     }
 
     pub fn scroll_terminal_scrollback(&mut self, id: WorkspaceId, tab_id: &str, delta: isize) {
@@ -345,7 +343,7 @@ impl TuiApp {
             .terminal_state
             .entry(id)
             .or_insert_with(WorkspaceTerminalState::new);
-        let parser = state.parser_mut(tab_id);
+        let parser = &mut state.tab_mut(tab_id).parser;
         let current = parser.screen().scrollback() as isize;
         let next = (current + delta).max(0) as usize;
         parser.set_scrollback(next);
@@ -371,9 +369,10 @@ impl TuiApp {
         let Some(state) = self.terminal_state.get(&id) else {
             return vec![Line::from("No terminal output yet.")];
         };
-        let Some(parser) = state.tabs.get(tab_id) else {
+        let Some(tab) = state.tabs.get(tab_id) else {
             return vec![Line::from("No terminal output yet.")];
         };
+        let parser = &tab.parser;
         let screen = parser.screen();
         let (cursor_row, cursor_col) = screen.cursor_position();
         let show_cursor = !screen.hide_cursor();
@@ -572,21 +571,57 @@ fn sanitize_workspace_tabs(mut state: WorkspaceTabsState) -> WorkspaceTabsState 
 }
 
 pub struct WorkspaceTerminalState {
-    pub tabs: HashMap<String, vt100::Parser>,
+    pub tabs: HashMap<String, TerminalBufferState>,
 }
 
 impl WorkspaceTerminalState {
     fn new() -> Self {
         let mut tabs = HashMap::new();
-        tabs.insert("agent".to_string(), make_parser());
-        tabs.insert("shell".to_string(), make_parser());
+        tabs.insert("agent".to_string(), TerminalBufferState::new());
+        tabs.insert("shell".to_string(), TerminalBufferState::new());
         Self { tabs }
     }
 
-    fn parser_mut(&mut self, tab_id: &str) -> &mut vt100::Parser {
+    fn tab_mut(&mut self, tab_id: &str) -> &mut TerminalBufferState {
         self.tabs
             .entry(tab_id.to_string())
-            .or_insert_with(make_parser)
+            .or_insert_with(TerminalBufferState::new)
+    }
+}
+
+const MAX_TERMINAL_HISTORY_BYTES: usize = 2 * 1024 * 1024;
+
+pub struct TerminalBufferState {
+    pub parser: vt100::Parser,
+    pub history: Vec<u8>,
+}
+
+impl TerminalBufferState {
+    fn new() -> Self {
+        Self {
+            parser: make_parser(),
+            history: Vec::new(),
+        }
+    }
+
+    fn append_bytes(&mut self, bytes: &[u8]) {
+        self.history.extend_from_slice(bytes);
+        if self.history.len() > MAX_TERMINAL_HISTORY_BYTES {
+            let trim = self.history.len() - MAX_TERMINAL_HISTORY_BYTES;
+            self.history.drain(..trim);
+        }
+        self.parser.process(bytes);
+    }
+
+    fn reset(&mut self) {
+        self.parser = make_parser();
+        self.history.clear();
+    }
+
+    fn rebuild_for_size(&mut self, cols: u16, rows: u16) {
+        let mut parser = vt100::Parser::new(rows.max(1), cols.max(1), 8000);
+        parser.process(&self.history);
+        self.parser = parser;
     }
 }
 

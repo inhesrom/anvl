@@ -417,6 +417,12 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     KeyCode::Enter => {
                                         if let Some(id) = app.selected_workspace_id() {
                                             app.open_workspace(id);
+                                            start_workspace_tab_terminals(
+                                                &backend.cmd_tx,
+                                                id,
+                                                &app.ws_tabs,
+                                            )
+                                            .await;
                                             let _ = backend
                                                 .cmd_tx
                                                 .send(Command::RefreshGit { id })
@@ -560,17 +566,6 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                                 .send(Command::LoadDiff { id, file })
                                                 .await;
                                         }
-                                    } else if matches!(app.focus, app::Focus::WsTerminalTabs) {
-                                        let _ = backend
-                                            .cmd_tx
-                                            .send(Command::StartTerminal {
-                                                id,
-                                                kind: app.active_tab_kind(),
-                                                tab_id: Some(app.active_tab_id()),
-                                                cmd: Vec::new(),
-                                            })
-                                            .await;
-                                        app.focus = app::Focus::WsTerminal;
                                     }
                                 }
                                 KeyCode::Tab => {
@@ -964,6 +959,7 @@ async fn handle_mouse(
                     app.set_home_selection(idx);
                     if let Some(id) = app.selected_workspace_id() {
                         app.open_workspace(id);
+                        start_workspace_tab_terminals(cmd_tx, id, &app.ws_tabs).await;
                         let _ = cmd_tx.send(Command::RefreshGit { id }).await;
                         let _ = cmd_tx.send(Command::ClearAttention { id }).await;
                     }
@@ -1007,7 +1003,10 @@ async fn handle_mouse(
                 {
                     app.ws_diff_scroll = app.ws_diff_scroll.saturating_sub(3);
                 } else if matches!(app.focus, app::Focus::WsTerminal)
-                    || matches!(hit, Some(ui::screens::workspace::WorkspaceHit::TerminalPane))
+                    || matches!(
+                        hit,
+                        Some(ui::screens::workspace::WorkspaceHit::TerminalPane)
+                    )
                 {
                     let tab_id = app.active_tab_id();
                     app.scroll_terminal_scrollback(id, &tab_id, 3);
@@ -1020,7 +1019,10 @@ async fn handle_mouse(
                 {
                     app.ws_diff_scroll = app.ws_diff_scroll.saturating_add(3);
                 } else if matches!(app.focus, app::Focus::WsTerminal)
-                    || matches!(hit, Some(ui::screens::workspace::WorkspaceHit::TerminalPane))
+                    || matches!(
+                        hit,
+                        Some(ui::screens::workspace::WorkspaceHit::TerminalPane)
+                    )
                 {
                     let tab_id = app.active_tab_id();
                     app.scroll_terminal_scrollback(id, &tab_id, -3);
@@ -1033,6 +1035,23 @@ async fn handle_mouse(
 
 fn point_in_rect(r: ratatui::layout::Rect, x: u16, y: u16) -> bool {
     x >= r.x && y >= r.y && x < r.right() && y < r.bottom()
+}
+
+async fn start_workspace_tab_terminals(
+    cmd_tx: &tokio::sync::mpsc::Sender<Command>,
+    id: protocol::WorkspaceId,
+    tabs: &[app::TerminalTab],
+) {
+    for tab in tabs {
+        let _ = cmd_tx
+            .send(Command::StartTerminal {
+                id,
+                kind: tab.kind,
+                tab_id: Some(tab.id.clone()),
+                cmd: Vec::new(),
+            })
+            .await;
+    }
 }
 
 async fn ensure_session_running(name: &str) -> Result<SessionEntry> {
@@ -1097,6 +1116,9 @@ fn delete_session(name: &str) -> Result<()> {
 
     registry.sessions.retain(|s| s.name != name);
     save_registry(&registry)?;
+    if let Some(path) = session_workspaces_persist_path(name) {
+        let _ = std::fs::remove_file(path);
+    }
     println!("deleted session '{}'", name);
     Ok(())
 }
@@ -1174,6 +1196,33 @@ fn session_registry_path() -> Option<PathBuf> {
         return None;
     };
     Some(base.join("multiws").join("sessions.json"))
+}
+
+fn session_workspaces_persist_path(name: &str) -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    let safe = sanitize_session_name(name);
+    Some(
+        PathBuf::from(home)
+            .join(".config")
+            .join("multiws")
+            .join(format!("workspaces.{safe}.json")),
+    )
+}
+
+fn sanitize_session_name(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return "default".to_string();
+    }
+    let mut out = String::with_capacity(trimmed.len());
+    for c in trimmed.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    out
 }
 
 fn load_registry() -> Result<SessionRegistry> {

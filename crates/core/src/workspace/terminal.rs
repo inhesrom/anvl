@@ -26,6 +26,14 @@ pub enum TerminalOutput {
 }
 
 impl TerminalSession {
+    pub fn is_alive(&self) -> bool {
+        match self.child.lock().try_wait() {
+            Ok(None) => true,
+            Ok(Some(_)) => false,
+            Err(_) => false,
+        }
+    }
+
     pub async fn send_input(&self, bytes: &[u8]) -> Result<()> {
         let mut writer = self.writer.lock();
         writer.write_all(bytes)?;

@@ -147,38 +147,57 @@ pub fn spawn_core() -> CoreHandle {
                         };
 
                         let tid = normalize_tab_id(kind, tab_id);
-                        match kind {
-                            protocol::TerminalKind::Agent => {
-                                if let Some(existing) = ws.terminals.agent.take() {
-                                    let _ = existing.stop().await;
-                                }
-                            }
-                            protocol::TerminalKind::Shell => {
-                                if let Some(existing) = ws.terminals.shells.remove(&tid) {
-                                    let _ = existing.stop().await;
-                                }
-                            }
-                        }
-
-                        match start_terminal(cwd, command).await {
-                            Ok((session, mut out_rx)) => {
-                                match kind {
-                                    protocol::TerminalKind::Agent => ws.terminals.agent = Some(session),
-                                    protocol::TerminalKind::Shell => {
-                                        ws.terminals.shells.insert(tid.clone(), session);
+                        let already_running = match kind {
+                            protocol::TerminalKind::Agent => ws
+                                .terminals
+                                .agent
+                                .as_ref()
+                                .map(|s| s.is_alive())
+                                .unwrap_or(false),
+                            protocol::TerminalKind::Shell => ws
+                                .terminals
+                                .shells
+                                .get(&tid)
+                                .map(|s| s.is_alive())
+                                .unwrap_or(false),
+                        };
+                        if already_running {
+                            ws.last_activity = Instant::now();
+                        } else {
+                            match kind {
+                                protocol::TerminalKind::Agent => {
+                                    if let Some(existing) = ws.terminals.agent.take() {
+                                        let _ = existing.stop().await;
                                     }
                                 }
-                                ws.last_activity = Instant::now();
-                                let _ = evt_tx_task.send(Event::TerminalStarted {
-                                    id,
-                                    kind,
-                                    tab_id: Some(tid.clone()),
-                                });
+                                protocol::TerminalKind::Shell => {
+                                    if let Some(existing) = ws.terminals.shells.remove(&tid) {
+                                        let _ = existing.stop().await;
+                                    }
+                                }
+                            }
 
-                                let evt_tx_outputs = evt_tx_task.clone();
-                                let cmd_tx_outputs = cmd_tx_internal.clone();
-                                let out_tab_id = tid.clone();
-                                tokio::spawn(async move {
+                            match start_terminal(cwd, command).await {
+                                Ok((session, mut out_rx)) => {
+                                    match kind {
+                                        protocol::TerminalKind::Agent => {
+                                            ws.terminals.agent = Some(session)
+                                        }
+                                        protocol::TerminalKind::Shell => {
+                                            ws.terminals.shells.insert(tid.clone(), session);
+                                        }
+                                    }
+                                    ws.last_activity = Instant::now();
+                                    let _ = evt_tx_task.send(Event::TerminalStarted {
+                                        id,
+                                        kind,
+                                        tab_id: Some(tid.clone()),
+                                    });
+
+                                    let evt_tx_outputs = evt_tx_task.clone();
+                                    let cmd_tx_outputs = cmd_tx_internal.clone();
+                                    let out_tab_id = tid.clone();
+                                    tokio::spawn(async move {
                                     let mut recent_agent_output = String::new();
                                     let mut idle_armed = false;
                                     let mut idle_triggered = false;
@@ -258,14 +277,15 @@ pub fn spawn_core() -> CoreHandle {
                                             }
                                         }
                                     }
-                                });
-                            }
-                            Err(err) => {
-                                let _ = evt_tx_task.send(Event::Error {
-                                    message: format!(
-                                        "StartTerminal failed for workspace {id}: {err}"
-                                    ),
-                                });
+                                    });
+                                }
+                                Err(err) => {
+                                    let _ = evt_tx_task.send(Event::Error {
+                                        message: format!(
+                                            "StartTerminal failed for workspace {id}: {err}"
+                                        ),
+                                    });
+                                }
                             }
                         }
                     }
