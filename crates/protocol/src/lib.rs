@@ -29,6 +29,8 @@ pub struct WorkspaceSummary {
     pub name: String,
     pub path: String,
     pub branch: Option<String>,
+    pub ahead: Option<u32>,
+    pub behind: Option<u32>,
     pub dirty_files: usize,
     pub attention: AttentionLevel,
     pub agent_running: bool,
@@ -39,13 +41,26 @@ pub struct WorkspaceSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChangedFile {
     pub path: String,
-    pub status: String,
+    pub index_status: char,
+    pub worktree_status: char,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitInfo {
+    pub hash: String,
+    pub message: String,
+    pub author: String,
+    pub date: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GitState {
     pub branch: Option<String>,
+    pub upstream: Option<String>,
+    pub ahead: Option<u32>,
+    pub behind: Option<u32>,
     pub changed: Vec<ChangedFile>,
+    pub recent_commits: Vec<CommitInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +90,28 @@ pub enum Command {
     LoadDiff {
         id: WorkspaceId,
         file: String,
+    },
+    LoadCommitDiff {
+        id: WorkspaceId,
+        hash: String,
+    },
+    GitStageFile {
+        id: WorkspaceId,
+        file: String,
+    },
+    GitUnstageFile {
+        id: WorkspaceId,
+        file: String,
+    },
+    GitStageAll {
+        id: WorkspaceId,
+    },
+    GitUnstageAll {
+        id: WorkspaceId,
+    },
+    GitCommit {
+        id: WorkspaceId,
+        message: String,
     },
     StartTerminal {
         id: WorkspaceId,
@@ -143,6 +180,12 @@ pub enum Event {
         #[serde(default)]
         tab_id: Option<String>,
         data_b64: String,
+    },
+    GitActionResult {
+        id: WorkspaceId,
+        action: String,
+        success: bool,
+        message: String,
     },
     Error {
         message: String,

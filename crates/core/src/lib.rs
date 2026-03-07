@@ -16,7 +16,10 @@ use protocol::{AttentionLevel, Command, Event, WorkspaceSummary};
 use state::{AppState, Workspace};
 use uuid::Uuid;
 use workspace::attention::{append_recent_output, detect_needs_input_text};
-use workspace::git::{diff_file, refresh_git};
+use workspace::git::{
+    commit, diff_commit, diff_file, refresh_git, stage_all, stage_file, unstage_all,
+    unstage_file,
+};
 use workspace::terminal::{start_terminal, TerminalOutput};
 
 #[derive(Clone)]
@@ -129,6 +132,102 @@ pub fn spawn_core() -> CoreHandle {
                                     ),
                                 });
                             }
+                        }
+                    }
+                }
+                Command::LoadCommitDiff { id, hash } => {
+                    if let Some(path) = state.workspaces.get(&id).map(|ws| ws.path.clone()) {
+                        match diff_commit(&path, &hash).await {
+                            Ok(diff) => {
+                                let _ = evt_tx_task.send(Event::WorkspaceDiffUpdated {
+                                    id,
+                                    file: hash,
+                                    diff,
+                                });
+                            }
+                            Err(err) => {
+                                let _ = evt_tx_task.send(Event::Error {
+                                    message: format!(
+                                        "LoadCommitDiff failed for {}: {err}",
+                                        path.display()
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+                Command::GitStageFile { id, file } => {
+                    if let Some(path) = state.workspaces.get(&id).map(|ws| ws.path.clone()) {
+                        let (success, message) = match stage_file(&path, &file).await {
+                            Ok(()) => (true, format!("Staged {file}")),
+                            Err(e) => (false, e.to_string()),
+                        };
+                        let _ = evt_tx_task.send(Event::GitActionResult {
+                            id, action: "stage".to_string(), success, message,
+                        });
+                        if let Ok(git) = refresh_git(&path).await {
+                            if let Some(ws) = state.workspaces.get_mut(&id) { ws.git = git.clone(); }
+                            let _ = evt_tx_task.send(Event::WorkspaceGitUpdated { id, git });
+                        }
+                    }
+                }
+                Command::GitUnstageFile { id, file } => {
+                    if let Some(path) = state.workspaces.get(&id).map(|ws| ws.path.clone()) {
+                        let (success, message) = match unstage_file(&path, &file).await {
+                            Ok(()) => (true, format!("Unstaged {file}")),
+                            Err(e) => (false, e.to_string()),
+                        };
+                        let _ = evt_tx_task.send(Event::GitActionResult {
+                            id, action: "unstage".to_string(), success, message,
+                        });
+                        if let Ok(git) = refresh_git(&path).await {
+                            if let Some(ws) = state.workspaces.get_mut(&id) { ws.git = git.clone(); }
+                            let _ = evt_tx_task.send(Event::WorkspaceGitUpdated { id, git });
+                        }
+                    }
+                }
+                Command::GitStageAll { id } => {
+                    if let Some(path) = state.workspaces.get(&id).map(|ws| ws.path.clone()) {
+                        let (success, message) = match stage_all(&path).await {
+                            Ok(()) => (true, "Staged all".to_string()),
+                            Err(e) => (false, e.to_string()),
+                        };
+                        let _ = evt_tx_task.send(Event::GitActionResult {
+                            id, action: "stage_all".to_string(), success, message,
+                        });
+                        if let Ok(git) = refresh_git(&path).await {
+                            if let Some(ws) = state.workspaces.get_mut(&id) { ws.git = git.clone(); }
+                            let _ = evt_tx_task.send(Event::WorkspaceGitUpdated { id, git });
+                        }
+                    }
+                }
+                Command::GitUnstageAll { id } => {
+                    if let Some(path) = state.workspaces.get(&id).map(|ws| ws.path.clone()) {
+                        let (success, message) = match unstage_all(&path).await {
+                            Ok(()) => (true, "Unstaged all".to_string()),
+                            Err(e) => (false, e.to_string()),
+                        };
+                        let _ = evt_tx_task.send(Event::GitActionResult {
+                            id, action: "unstage_all".to_string(), success, message,
+                        });
+                        if let Ok(git) = refresh_git(&path).await {
+                            if let Some(ws) = state.workspaces.get_mut(&id) { ws.git = git.clone(); }
+                            let _ = evt_tx_task.send(Event::WorkspaceGitUpdated { id, git });
+                        }
+                    }
+                }
+                Command::GitCommit { id, message } => {
+                    if let Some(path) = state.workspaces.get(&id).map(|ws| ws.path.clone()) {
+                        let (success, msg) = match commit(&path, &message).await {
+                            Ok(()) => (true, "Committed".to_string()),
+                            Err(e) => (false, e.to_string()),
+                        };
+                        let _ = evt_tx_task.send(Event::GitActionResult {
+                            id, action: "commit".to_string(), success, message: msg,
+                        });
+                        if let Ok(git) = refresh_git(&path).await {
+                            if let Some(ws) = state.workspaces.get_mut(&id) { ws.git = git.clone(); }
+                            let _ = evt_tx_task.send(Event::WorkspaceGitUpdated { id, git });
                         }
                     }
                 }
@@ -363,15 +462,22 @@ pub fn spawn_core() -> CoreHandle {
             let _ = evt_tx_task.send(Event::WorkspaceList { items });
                 }
                 _ = git_tick.tick() => {
-                    let ids = state.ordered_ids.clone();
-                    for id in ids {
-                        if let Some(path) = state.workspaces.get(&id).map(|ws| ws.path.clone()) {
-                            if let Ok(git) = refresh_git(&path).await {
-                                if let Some(ws) = state.workspaces.get_mut(&id) {
-                                    ws.git = git.clone();
-                                }
-                                let _ = evt_tx_task.send(Event::WorkspaceGitUpdated { id, git });
+                    let pairs: Vec<_> = state.ordered_ids.iter()
+                        .filter_map(|id| state.workspaces.get(id).map(|ws| (*id, ws.path.clone())))
+                        .collect();
+                    let results = futures::future::join_all(
+                        pairs.iter().map(|(id, path)| {
+                            let id = *id;
+                            let path = path.clone();
+                            async move { (id, refresh_git(&path).await) }
+                        })
+                    ).await;
+                    for (id, result) in results {
+                        if let Ok(git) = result {
+                            if let Some(ws) = state.workspaces.get_mut(&id) {
+                                ws.git = git.clone();
                             }
+                            let _ = evt_tx_task.send(Event::WorkspaceGitUpdated { id, git });
                         }
                     }
                     let _ = evt_tx_task.send(Event::WorkspaceList {
@@ -395,6 +501,8 @@ fn workspace_summaries(state: &AppState) -> Vec<WorkspaceSummary> {
             name: ws.name.clone(),
             path: ws.path.display().to_string(),
             branch: ws.git.branch.clone(),
+            ahead: ws.git.ahead,
+            behind: ws.git.behind,
             dirty_files: ws.git.changed.len(),
             attention: ws.attention,
             agent_running: ws.terminals.agent.is_some(),

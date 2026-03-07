@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use protocol::{GitState, Route, TerminalKind, WorkspaceId, WorkspaceSummary};
 use ratatui::{
@@ -14,6 +15,7 @@ pub enum Focus {
     HomeGrid,
     WsHeader,
     WsFiles,
+    WsLog,
     WsDiff,
     WsTerminal,
     WsTerminalTabs,
@@ -34,12 +36,15 @@ pub struct TuiApp {
     pub ws_next_shell_tab: u32,
     pub home_selected: usize,
     pub ws_selected_file: usize,
+    pub ws_selected_commit: usize,
     pub ws_diff_scroll: u16,
     pub flash_on: bool,
     pub add_workspace_path_input: Option<String>,
     pub pending_delete_workspace: Option<WorkspaceId>,
     pub rename_workspace_input: Option<String>,
     pub rename_tab_input: Option<String>,
+    pub git_action_message: Option<(String, Instant)>,
+    pub commit_input: Option<String>,
 }
 
 impl Default for TuiApp {
@@ -62,12 +67,15 @@ impl Default for TuiApp {
             ws_next_shell_tab: 2,
             home_selected: 0,
             ws_selected_file: 0,
+            ws_selected_commit: 0,
             ws_diff_scroll: 0,
             flash_on: false,
             add_workspace_path_input: None,
             pending_delete_workspace: None,
             rename_workspace_input: None,
             rename_tab_input: None,
+            git_action_message: None,
+            commit_input: None,
         }
     }
 }
@@ -441,6 +449,35 @@ impl TuiApp {
         git.changed
             .get(self.ws_selected_file)
             .map(|c| c.path.clone())
+    }
+
+    pub fn move_workspace_commit_selection(&mut self, delta: isize) {
+        let Some(id) = self.active_workspace_id() else {
+            return;
+        };
+        let Some(git) = self.workspace_git.get(&id) else {
+            self.ws_selected_commit = 0;
+            return;
+        };
+        if git.recent_commits.is_empty() {
+            self.ws_selected_commit = 0;
+            return;
+        }
+        let len = git.recent_commits.len() as isize;
+        let next = (self.ws_selected_commit as isize + delta).clamp(0, len - 1);
+        self.ws_selected_commit = next as usize;
+    }
+
+    pub fn selected_commit_hash(&self) -> Option<String> {
+        let id = self.active_workspace_id()?;
+        let git = self.workspace_git.get(&id)?;
+        git.recent_commits
+            .get(self.ws_selected_commit)
+            .map(|c| c.hash.clone())
+    }
+
+    pub fn is_committing(&self) -> bool {
+        self.commit_input.is_some()
     }
 
     fn clamp_selected_file(&mut self) {

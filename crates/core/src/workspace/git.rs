@@ -2,45 +2,94 @@ use anyhow::Result;
 use std::path::Path;
 use tokio::process::Command;
 
-use protocol::{ChangedFile, GitState};
+use protocol::{ChangedFile, CommitInfo, GitState};
 
 pub async fn refresh_git(repo: &Path) -> Result<GitState> {
-    let branch_out = Command::new("git")
-        .arg("rev-parse")
-        .arg("--abbrev-ref")
-        .arg("HEAD")
+    let branch_fut = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(repo)
-        .output()
-        .await?;
+        .output();
 
-    let branch = if branch_out.status.success() {
-        Some(
-            String::from_utf8_lossy(&branch_out.stdout)
-                .trim()
-                .to_string(),
-        )
-        .filter(|s| !s.is_empty())
-    } else {
-        None
+    let status_fut = Command::new("git")
+        .args(["status", "--porcelain=v1"])
+        .current_dir(repo)
+        .output();
+
+    let upstream_fut = get_upstream_status(repo);
+    let commits_fut = get_recent_commits(repo, 20);
+
+    let (branch_out, status_out, (upstream, ahead, behind), recent_commits) =
+        tokio::join!(branch_fut, status_fut, upstream_fut, commits_fut);
+
+    let branch = match branch_out {
+        Ok(out) if out.status.success() => {
+            Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+                .filter(|s| !s.is_empty())
+        }
+        _ => None,
     };
 
-    let status_out = Command::new("git")
-        .arg("status")
-        .arg("--porcelain=v1")
-        .current_dir(repo)
-        .output()
-        .await?;
-
     let mut changed = Vec::new();
-    if status_out.status.success() {
-        for line in String::from_utf8_lossy(&status_out.stdout).lines() {
-            if let Some(file) = parse_porcelain_line(line) {
-                changed.push(file);
+    if let Ok(out) = status_out {
+        if out.status.success() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                if let Some(file) = parse_porcelain_line(line) {
+                    changed.push(file);
+                }
             }
         }
     }
 
-    Ok(GitState { branch, changed })
+    Ok(GitState {
+        branch,
+        upstream,
+        ahead,
+        behind,
+        changed,
+        recent_commits,
+    })
+}
+
+async fn get_upstream_status(repo: &Path) -> (Option<String>, Option<u32>, Option<u32>) {
+    let upstream_out = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+        .current_dir(repo)
+        .output()
+        .await;
+
+    let upstream = match upstream_out {
+        Ok(out) if out.status.success() => {
+            let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if name.is_empty() {
+                return (None, None, None);
+            }
+            Some(name)
+        }
+        _ => return (None, None, None),
+    };
+
+    let count_out = Command::new("git")
+        .args(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+        .current_dir(repo)
+        .output()
+        .await;
+
+    let (ahead, behind) = match count_out {
+        Ok(out) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let parts: Vec<&str> = text.trim().split('\t').collect();
+            if parts.len() == 2 {
+                let a = parts[0].parse::<u32>().unwrap_or(0);
+                let b = parts[1].parse::<u32>().unwrap_or(0);
+                (Some(a), Some(b))
+            } else {
+                (Some(0), Some(0))
+            }
+        }
+        _ => (None, None),
+    };
+
+    (upstream, ahead, behind)
 }
 
 pub async fn diff_file(repo: &Path, file: &str) -> Result<String> {
@@ -100,17 +149,137 @@ pub async fn diff_file(repo: &Path, file: &str) -> Result<String> {
     Ok(diff)
 }
 
-#[allow(dead_code)]
 fn parse_porcelain_line(line: &str) -> Option<ChangedFile> {
     if line.len() < 3 {
         return None;
     }
 
-    let status = line[..2].trim().to_string();
+    let bytes = line.as_bytes();
+    let index_status = bytes[0] as char;
+    let worktree_status = bytes[1] as char;
     let path = line[3..].trim().to_string();
     if path.is_empty() {
         return None;
     }
 
-    Some(ChangedFile { path, status })
+    Some(ChangedFile {
+        path,
+        index_status,
+        worktree_status,
+    })
+}
+
+async fn get_recent_commits(repo: &Path, count: usize) -> Vec<CommitInfo> {
+    let format = "%h\x1f%s\x1f%an\x1f%cr";
+    let out = Command::new("git")
+        .args(["log", &format!("-{count}"), &format!("--format={format}")])
+        .current_dir(repo)
+        .output()
+        .await;
+
+    let Ok(out) = out else { return Vec::new() };
+    if !out.status.success() {
+        return Vec::new();
+    }
+
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.splitn(4, '\x1f').collect();
+            if parts.len() == 4 {
+                Some(CommitInfo {
+                    hash: parts[0].to_string(),
+                    message: parts[1].to_string(),
+                    author: parts[2].to_string(),
+                    date: parts[3].to_string(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+pub async fn diff_commit(repo: &Path, hash: &str) -> Result<String> {
+    let out = Command::new("git")
+        .args(["show", hash, "--format="])
+        .current_dir(repo)
+        .output()
+        .await?;
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+pub async fn stage_file(repo: &Path, file: &str) -> Result<()> {
+    let out = Command::new("git")
+        .args(["add", "--", file])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git add failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+pub async fn unstage_file(repo: &Path, file: &str) -> Result<()> {
+    let out = Command::new("git")
+        .args(["reset", "HEAD", "--", file])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git reset failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+pub async fn stage_all(repo: &Path) -> Result<()> {
+    let out = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git add -A failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+pub async fn unstage_all(repo: &Path) -> Result<()> {
+    let out = Command::new("git")
+        .args(["reset", "HEAD"])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git reset failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+pub async fn commit(repo: &Path, message: &str) -> Result<()> {
+    let out = Command::new("git")
+        .args(["commit", "-m", message])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git commit failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
 }

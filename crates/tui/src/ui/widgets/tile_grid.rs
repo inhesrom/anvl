@@ -187,12 +187,32 @@ const BODY_TEXT_MAX: usize = (TILE_W as usize) - 6;
 
 fn build_branch_line(ws: &WorkspaceSummary) -> Line<'static> {
     let branch = ws.branch.as_deref().unwrap_or("-");
+    let ab = match (ws.ahead, ws.behind) {
+        (Some(a), Some(b)) if a == 0 && b == 0 => " =".to_string(),
+        (Some(a), Some(b)) => {
+            let mut s = String::new();
+            if a > 0 {
+                s.push_str(&format!(" ↑{a}"));
+            }
+            if b > 0 {
+                s.push_str(&format!(" ↓{b}"));
+            }
+            s
+        }
+        _ => String::new(),
+    };
+    let ab_style = if ws.ahead.unwrap_or(0) > 0 || ws.behind.unwrap_or(0) > 0 {
+        Style::default().fg(Color::Cyan)
+    } else {
+        dim_style()
+    };
     Line::from(vec![
         Span::styled("  ⎇ ", dim_style()),
         Span::styled(
-            truncate_end(branch, BODY_TEXT_MAX),
+            truncate_end(branch, BODY_TEXT_MAX.saturating_sub(ab.len())),
             Style::default().fg(Color::White),
         ),
+        Span::styled(ab, ab_style),
     ])
 }
 

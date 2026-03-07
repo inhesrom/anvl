@@ -16,6 +16,7 @@ pub enum WorkspaceHit {
     TerminalTab(usize),
     TerminalPane,
     FilesList(usize),
+    LogList(usize),
     DiffPane,
 }
 
@@ -25,6 +26,7 @@ struct WorkspaceLayout {
     terminal_tabs: Rect,
     terminal_pane: Rect,
     git_files: Rect,
+    git_log: Rect,
     git_diff: Rect,
     footer: Rect,
 }
@@ -44,7 +46,9 @@ fn layout(area: Rect, focus: crate::app::Focus) -> WorkspaceLayout {
             crate::app::Focus::WsTerminal | crate::app::Focus::WsTerminalTabs => {
                 [Constraint::Percentage(72), Constraint::Percentage(28)]
             }
-            crate::app::Focus::WsFiles | crate::app::Focus::WsDiff => {
+            crate::app::Focus::WsFiles
+            | crate::app::Focus::WsLog
+            | crate::app::Focus::WsDiff => {
                 [Constraint::Percentage(35), Constraint::Percentage(65)]
             }
             _ => [Constraint::Percentage(55), Constraint::Percentage(45)],
@@ -59,11 +63,18 @@ fn layout(area: Rect, focus: crate::app::Focus) -> WorkspaceLayout {
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(body[1]);
 
+    // Split left pane into files (top) + commit log (bottom)
+    let left_split = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(git_area[0]);
+
     WorkspaceLayout {
         header: chunks[0],
         terminal_tabs: terminal_area[0],
         terminal_pane: terminal_area[1],
-        git_files: git_area[0],
+        git_files: left_split[0],
+        git_log: left_split[1],
         git_diff: git_area[1],
         footer: chunks[2],
     }
@@ -96,7 +107,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
     };
     let title = ws_id
         .and_then(|id| app.workspaces.iter().find(|w| w.id == id))
-        .map(|w| format!("Workspace: {} ({})", w.name, w.path))
+        .map(|w| {
+            let git = ws_id.and_then(|id| app.workspace_git.get(&id));
+            let branch = git.and_then(|g| g.branch.as_deref()).unwrap_or("-");
+            let ab = match (git.and_then(|g| g.ahead), git.and_then(|g| g.behind)) {
+                (Some(a), Some(b)) if a == 0 && b == 0 => " =".to_string(),
+                (Some(a), Some(b)) => {
+                    let mut s = String::new();
+                    if a > 0 {
+                        s.push_str(&format!(" ↑{a}"));
+                    }
+                    if b > 0 {
+                        s.push_str(&format!(" ↓{b}"));
+                    }
+                    s
+                }
+                _ => String::new(),
+            };
+            format!(
+                "Workspace: {} ({})  {} {}{}",
+                w.name, w.path, branch, w.dirty_files, ab
+            )
+        })
         .unwrap_or_else(|| "Workspace".to_string());
 
     let (header_style, header_border_type) =
@@ -116,6 +148,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         l.header,
     );
 
+    // --- Changed Files ---
     let files = ws_id
         .and_then(|id| app.workspace_git.get(&id))
         .map(|g| g.changed.clone())
@@ -126,7 +159,25 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
     }
     let file_items = files
         .iter()
-        .map(|f| ListItem::new(format!("{:>2} {}", f.status, f.path)))
+        .map(|f| {
+            let idx = f.index_status;
+            let wt = f.worktree_status;
+            let idx_style = match idx {
+                '?' => Style::default().fg(Color::Red),
+                ' ' => Style::default().fg(Color::DarkGray),
+                _ => Style::default().fg(Color::Green),
+            };
+            let wt_style = match wt {
+                '?' => Style::default().fg(Color::Red),
+                ' ' => Style::default().fg(Color::DarkGray),
+                _ => Style::default().fg(Color::Yellow),
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(idx.to_string(), idx_style),
+                Span::styled(wt.to_string(), wt_style),
+                Span::raw(format!(" {}", f.path)),
+            ]))
+        })
         .collect::<Vec<_>>();
     let (files_style, files_border_type) =
         focused_border(app.focus == crate::app::Focus::WsFiles);
@@ -146,6 +197,49 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         );
     frame.render_stateful_widget(file_list, l.git_files, &mut list_state);
 
+    // --- Recent Commits ---
+    let commits = ws_id
+        .and_then(|id| app.workspace_git.get(&id))
+        .map(|g| g.recent_commits.clone())
+        .unwrap_or_default();
+    let mut commit_list_state = ListState::default();
+    if !commits.is_empty() {
+        commit_list_state.select(Some(app.ws_selected_commit.min(commits.len() - 1)));
+    }
+    let commit_items = commits
+        .iter()
+        .map(|c| {
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("{} ", c.hash),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::raw(&c.message),
+                Span::styled(
+                    format!(" ({}, {})", c.author, c.date),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]))
+        })
+        .collect::<Vec<_>>();
+    let (log_style, log_border_type) = focused_border(app.focus == crate::app::Focus::WsLog);
+    let commit_list = List::new(commit_items)
+        .block(
+            Block::default()
+                .title("Recent Commits")
+                .borders(Borders::ALL)
+                .border_style(log_style)
+                .border_type(log_border_type),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+    frame.render_stateful_widget(commit_list, l.git_log, &mut commit_list_state);
+
+    // --- Diff Pane ---
     let diff_text = ws_id
         .and_then(|id| app.workspace_diff.get(&id))
         .map(|(_, d)| d.clone())
@@ -184,6 +278,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         l.git_diff,
     );
 
+    // --- Terminal Tabs ---
     let ws_summary = ws_id.and_then(|id| app.workspaces.iter().find(|w| w.id == id));
     let (agent_running, shell_running) = ws_summary
         .map(|w| (w.agent_running, w.shell_running))
@@ -216,7 +311,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         let (tab_style, tab_border_type) = if i == app.ws_active_tab {
             (selected_style, BorderType::Thick)
         } else {
-            (Style::default().add_modifier(Modifier::DIM), BorderType::Plain)
+            (
+                Style::default().add_modifier(Modifier::DIM),
+                BorderType::Plain,
+            )
         };
         frame.render_widget(
             Paragraph::new(format!(
@@ -235,6 +333,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         );
     }
 
+    // --- Terminal Pane ---
     let terminal_lines = ws_id
         .map(|id| app.terminal_lines(id, &app.active_tab_id()))
         .unwrap_or_else(|| vec![Line::from("No terminal output yet.")]);
@@ -252,7 +351,59 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         l.terminal_pane,
     );
 
+    // --- Footer ---
     footer::render(frame, l.footer, app);
+
+    // --- Toast overlay for git action messages ---
+    if let Some((msg, ts)) = &app.git_action_message {
+        if ts.elapsed() < std::time::Duration::from_secs(3) {
+            let toast_width = (msg.len() as u16 + 4).min(area.width);
+            let toast_rect = Rect::new(
+                area.x + area.width.saturating_sub(toast_width) - 1,
+                area.y + area.height.saturating_sub(4),
+                toast_width,
+                3,
+            );
+            frame.render_widget(Clear, toast_rect);
+            frame.render_widget(
+                Paragraph::new(msg.as_str()).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Green)),
+                ),
+                toast_rect,
+            );
+        }
+    }
+
+    // --- Commit modal ---
+    if let Some(input) = &app.commit_input {
+        let modal_w = 60u16.min(area.width.saturating_sub(4));
+        let modal_h = 5u16;
+        let modal_rect = Rect::new(
+            area.x + (area.width.saturating_sub(modal_w)) / 2,
+            area.y + (area.height.saturating_sub(modal_h)) / 2,
+            modal_w,
+            modal_h,
+        );
+        frame.render_widget(Clear, modal_rect);
+        frame.render_widget(
+            Paragraph::new(format!("{input}_"))
+                .block(
+                    Block::default()
+                        .title("Commit Message (Enter to commit, Esc to cancel)")
+                        .borders(Borders::ALL)
+                        .border_style(
+                            Style::default()
+                                .fg(Color::LightBlue)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .border_type(BorderType::Thick),
+                )
+                .wrap(Wrap { trim: false }),
+            modal_rect,
+        );
+    }
 }
 
 pub fn hit_test(area: Rect, app: &TuiApp, x: u16, y: u16) -> Option<WorkspaceHit> {
@@ -275,6 +426,26 @@ pub fn hit_test(area: Rect, app: &TuiApp, x: u16, y: u16) -> Option<WorkspaceHit
     }
     if point_inside(l.git_diff) {
         return Some(WorkspaceHit::DiffPane);
+    }
+    if point_inside(l.git_log) {
+        let ws_id = match app.route {
+            Route::Workspace { id } => id,
+            _ => return None,
+        };
+        let commit_count = app
+            .workspace_git
+            .get(&ws_id)
+            .map(|g| g.recent_commits.len())
+            .unwrap_or(0);
+        if commit_count == 0 {
+            return Some(WorkspaceHit::LogList(0));
+        }
+        let content_top = l.git_log.y.saturating_add(1);
+        if y < content_top {
+            return Some(WorkspaceHit::LogList(0));
+        }
+        let idx = (y - content_top) as usize;
+        return Some(WorkspaceHit::LogList(idx.min(commit_count - 1)));
     }
     if point_inside(l.git_files) {
         let ws_id = match app.route {
