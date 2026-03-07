@@ -7,9 +7,9 @@ use ratatui::{
     Frame,
 };
 
-pub const TILE_W: u16 = 38;
-pub const TILE_H: u16 = 5;
-const ORANGE: Color = Color::Rgb(255, 165, 0);
+pub const TILE_W: u16 = 56;
+pub const TILE_H: u16 = 9;
+pub const ORANGE: Color = Color::Rgb(255, 165, 0);
 
 /// Renders the workspace tile grid into `area`.
 ///
@@ -30,7 +30,7 @@ pub fn render(
     let cols = (area.width / TILE_W).max(1) as usize;
     for (i, ws) in items.iter().enumerate() {
         let tile = tile_rect(area, i, cols);
-        if tile.width < 8 || tile.height < 5 {
+        if tile.width < 8 || tile.height < 9 {
             continue;
         }
         render_tile(frame, tile, ws, i == selected, flash_on);
@@ -89,6 +89,11 @@ fn render_tile(
     flash_on: bool,
 ) {
     let border_style = tile_border_style(ws, is_selected, flash_on);
+    let border_type = if is_selected {
+        BorderType::Thick
+    } else {
+        BorderType::Rounded
+    };
     let title_left = Line::from(Span::styled(
         format!(" {} ", ws.name),
         Style::default()
@@ -96,19 +101,16 @@ fn render_tile(
             .add_modifier(Modifier::BOLD),
     ));
     let title_right = build_status_badge(&ws.attention, flash_on);
-    let body_line = build_body_line(ws);
+    let body_lines = build_body_lines(ws);
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
+        .border_type(border_type)
         .border_style(border_style)
         .title_top(title_left)
         .title_top(title_right.right_aligned());
 
-    frame.render_widget(
-        Paragraph::new(vec![Line::from(""), body_line]).block(block),
-        tile,
-    );
+    frame.render_widget(Paragraph::new(body_lines).block(block), tile);
 }
 
 /// Computes the border style based on attention level, selection, and flash phase.
@@ -128,7 +130,6 @@ fn tile_border_style(ws: &WorkspaceSummary, is_selected: bool, flash_on: bool) -
                 Style::default().fg(Color::White)
             }
         }
-        _ if ws.agent_running => Style::default().fg(Color::White),
         _ => Style::default().fg(Color::White),
     };
 
@@ -144,7 +145,7 @@ fn tile_border_style(ws: &WorkspaceSummary, is_selected: bool, flash_on: bool) -
         base
     } else {
         Style::default()
-            .fg(Color::Blue)
+            .fg(Color::LightBlue)
             .add_modifier(Modifier::BOLD)
     }
 }
@@ -165,31 +166,76 @@ fn build_status_badge(attention: &AttentionLevel, flash_on: bool) -> Line<'stati
     }
 }
 
-/// Builds the single-line metadata row: branch, dirty count, agent status.
-fn build_body_line(ws: &WorkspaceSummary) -> Line<'static> {
-    let dim = Style::default().fg(Color::DarkGray);
+/// Builds the 7 inner body lines displayed inside a workspace tile.
+///
+/// The count is fixed at 7 to fill `TILE_H - 2` rows (tile height minus
+/// the top and bottom border lines).
+fn build_body_lines(ws: &WorkspaceSummary) -> Vec<Line<'static>> {
+    vec![
+        Line::from(""),
+        build_branch_line(ws),
+        build_path_line(ws),
+        Line::from(""),
+        build_stats_line(ws),
+        Line::from(""),
+        Line::from(""),
+    ]
+}
+
+/// Max text width inside a tile: TILE_W minus 2 border columns and 4 icon-prefix columns.
+const BODY_TEXT_MAX: usize = (TILE_W as usize) - 6;
+
+fn build_branch_line(ws: &WorkspaceSummary) -> Line<'static> {
     let branch = ws.branch.as_deref().unwrap_or("-");
     Line::from(vec![
-        Span::styled(" ⎇ ", dim),
+        Span::styled("  ⎇ ", dim_style()),
         Span::styled(
-            truncate_end(branch, 12),
+            truncate_end(branch, BODY_TEXT_MAX),
             Style::default().fg(Color::White),
         ),
+    ])
+}
+
+fn build_path_line(ws: &WorkspaceSummary) -> Line<'static> {
+    let dim = dim_style();
+    Line::from(vec![
+        Span::styled("  ", dim),
+        Span::styled(truncate_end(&ws.path, BODY_TEXT_MAX), dim),
+    ])
+}
+
+fn build_stats_line(ws: &WorkspaceSummary) -> Line<'static> {
+    let dim = dim_style();
+    Line::from(vec![
         Span::styled("  ◈ ", dim),
         Span::styled(
-            ws.dirty_files.to_string(),
+            format!("{} changes", ws.dirty_files),
             Style::default().fg(Color::Yellow),
         ),
-        Span::styled("  ● ", dim),
+        Span::styled("    ● ", dim),
         Span::styled(
             if ws.agent_running { "agent" } else { "off" },
-            if ws.agent_running {
-                Style::default().fg(Color::Green)
-            } else {
-                dim
-            },
+            running_style(ws.agent_running),
+        ),
+        Span::styled("    ⌀ ", dim),
+        Span::styled(
+            if ws.shell_running { "shell" } else { "off" },
+            running_style(ws.shell_running),
         ),
     ])
+}
+
+#[inline]
+fn dim_style() -> Style {
+    Style::default().fg(Color::DarkGray)
+}
+
+fn running_style(running: bool) -> Style {
+    if running {
+        Style::default().fg(Color::Green)
+    } else {
+        dim_style()
+    }
 }
 
 /// Returns `style` with `BOLD` added when `flash_on` is true.

@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::TuiApp;
+use crate::ui::footer;
 use protocol::Route;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +76,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         if focused {
             (
                 Style::default()
-                    .fg(Color::Blue)
+                    .fg(Color::LightBlue)
                     .add_modifier(Modifier::BOLD),
                 BorderType::Thick,
             )
@@ -251,13 +252,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         l.terminal_pane,
     );
 
-    let footer = "Tab/S-Tab focus | h/l or <-/-> tab | n new tab | x close | r rename tab | e rename workspace | a start | A stop | Esc Home, then n = new workspace";
-    frame.render_widget(
-        Paragraph::new(footer)
-            .block(Block::default().borders(Borders::TOP))
-            .style(Style::default().fg(Color::Gray)),
-        l.footer,
-    );
+    footer::render(frame, l.footer, app);
 }
 
 pub fn hit_test(area: Rect, app: &TuiApp, x: u16, y: u16) -> Option<WorkspaceHit> {

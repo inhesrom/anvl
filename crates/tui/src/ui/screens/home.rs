@@ -2,31 +2,26 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
     Frame,
 };
 
 use crate::app::TuiApp;
+use crate::ui::footer;
 use crate::ui::widgets::tile_grid;
+use tile_grid::ORANGE;
 
+/// Renders the home screen: dashboard header, tile grid, footer, and any open modals.
 pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let chunks = home_chunks(area);
+    render_dashboard(frame, chunks[0], app);
+    tile_grid::render(frame, chunks[1], &app.workspaces, app.home_selected, app.flash_on);
+    footer::render(frame, chunks[2], app);
+    render_modals(frame, area, app);
+}
 
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                "multiws ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("command center"),
-            Span::raw("    / filter   n new   D delete   Enter open"),
-        ]))
-        .block(Block::default().borders(Borders::BOTTOM)),
-        chunks[0],
-    );
-
+/// Renders the rounded dashboard box with colored status badges.
+fn render_dashboard(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let needs_input = app
         .workspaces
         .iter()
@@ -39,47 +34,67 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         .count();
     let dirty = app.workspaces.iter().map(|w| w.dirty_files).sum::<usize>();
     let running_agents = app.workspaces.iter().filter(|w| w.agent_running).count();
-    let stats = format!(
-        "Needs Input: {}   Errors: {}   Dirty Files: {}   Running Agents: {}",
-        needs_input, errors, dirty, running_agents
-    );
-    frame.render_widget(
-        Paragraph::new(stats)
-            .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().title("Status").borders(Borders::BOTTOM)),
-        chunks[1],
-    );
 
-    tile_grid::render(
-        frame,
-        chunks[2],
-        &app.workspaces,
-        app.home_selected,
-        app.flash_on,
-    );
+    let mut spans = Vec::new();
+    spans.extend(dashboard_badge(needs_input, "\u{26A0}", "input", ORANGE));
+    spans.extend(dashboard_badge(errors, "\u{2716}", "error", Color::Red));
+    spans.extend(dashboard_badge(dirty, "\u{25C8}", "dirty", Color::Yellow));
+    spans.extend(dashboard_badge(running_agents, "\u{25CF}", "agents", Color::Green));
 
-    let footer = "Home: arrows/hjkl move | Enter open | n add workspace | D delete workspace | ! toggle attention | q quit";
-    frame.render_widget(
-        Paragraph::new(footer)
-            .block(Block::default().borders(Borders::TOP))
-            .style(Style::default().fg(Color::Gray)),
-        chunks[3],
+    let dashboard = Paragraph::new(Line::from(spans)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title_top(Line::from(Span::styled(
+                " \u{25C8} flow ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ))),
     );
+    frame.render_widget(dashboard, area);
+}
 
+/// Builds a styled icon+count badge span pair for the dashboard header.
+/// Returns dimmed spans when `count` is zero so the layout stays stable.
+fn dashboard_badge(count: usize, icon: &str, label: &str, color: Color) -> Vec<Span<'static>> {
+    let dim = Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::DIM);
+    if count > 0 {
+        vec![
+            Span::styled(
+                format!("{} {} ", icon, count),
+                Style::default()
+                    .fg(color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}     ", label),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]
+    } else {
+        vec![
+            Span::styled(format!("{} {} ", icon, count), dim),
+            Span::styled(format!("{}     ", label), dim),
+        ]
+    }
+}
+
+/// Renders the add-workspace and delete-confirmation modals when active.
+fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
     if let Some(path_input) = &app.add_workspace_path_input {
         let modal = centered_rect(area, 70, 7);
         frame.render_widget(Clear, modal);
         frame.render_widget(
-            Paragraph::new(format!(
-                "New Workspace Path\n\n{}\n\nEnter: create   Esc: cancel",
-                path_input
-            ))
-            .alignment(Alignment::Left)
-            .block(
-                Block::default()
-                    .title("Add Workspace")
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(format!("New Workspace Path\n\n{}", path_input))
+                .alignment(Alignment::Left)
+                .block(
+                    Block::default()
+                        .title("Add Workspace")
+                        .borders(Borders::ALL),
+                ),
             modal,
         );
     }
@@ -94,21 +109,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         let modal = centered_rect(area, 56, 7);
         frame.render_widget(Clear, modal);
         frame.render_widget(
-            Paragraph::new(format!(
-                "Delete workspace?\n\n{}\n\nY: delete   N: cancel",
-                name
-            ))
-            .alignment(Alignment::Left)
-            .block(
-                Block::default()
-                    .title("Confirm Delete")
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(format!("Delete workspace?\n\n{}", name))
+                .alignment(Alignment::Left)
+                .block(
+                    Block::default()
+                        .title("Confirm Delete")
+                        .borders(Borders::ALL),
+                ),
             modal,
         );
     }
 }
 
+/// Returns a centered rectangle within `area` at `width_pct` width and fixed `height`.
 fn centered_rect(area: Rect, width_pct: u16, height: u16) -> Rect {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -129,23 +142,26 @@ fn centered_rect(area: Rect, width_pct: u16, height: u16) -> Rect {
     horizontal[1]
 }
 
+/// Returns the rectangle used by the add-workspace modal.
 pub fn add_modal_rect(area: Rect) -> Rect {
     centered_rect(area, 70, 7)
 }
 
+/// Returns the rectangle used by the delete-confirmation modal.
 pub fn delete_modal_rect(area: Rect) -> Rect {
     centered_rect(area, 56, 7)
 }
 
+/// Returns the rectangle occupied by the tile grid on the home screen.
 pub fn grid_rect(area: Rect) -> Rect {
-    home_chunks(area)[2]
+    home_chunks(area)[1]
 }
 
+/// Splits the home screen area into dashboard header, grid, and footer chunks.
 fn home_chunks(area: Rect) -> Vec<Rect> {
     Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Min(5),
             Constraint::Length(2),
