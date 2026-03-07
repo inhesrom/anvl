@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use protocol::{GitState, Route, TerminalKind, WorkspaceId, WorkspaceSummary};
+use protocol::{BranchInfo, GitState, RemoteBranchInfo, Route, TerminalKind, WorkspaceId, WorkspaceSummary};
 use ratatui::{
     style::{Color as TuiColor, Modifier, Style},
     text::{Line, Span},
@@ -16,9 +16,16 @@ pub enum Focus {
     WsHeader,
     WsFiles,
     WsLog,
+    WsBranches,
     WsDiff,
     WsTerminal,
     WsTerminalTabs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchSubPane {
+    Local,
+    Remote,
 }
 
 pub struct TuiApp {
@@ -37,6 +44,10 @@ pub struct TuiApp {
     pub home_selected: usize,
     pub ws_selected_file: usize,
     pub ws_selected_commit: usize,
+    pub ws_selected_local_branch: usize,
+    pub ws_selected_remote_branch: usize,
+    pub ws_branch_sub_pane: BranchSubPane,
+    pub ws_pending_select_head_branch: bool,
     pub ws_diff_scroll: u16,
     pub flash_on: bool,
     pub add_workspace_path_input: Option<String>,
@@ -45,6 +56,7 @@ pub struct TuiApp {
     pub rename_tab_input: Option<String>,
     pub git_action_message: Option<(String, Instant)>,
     pub commit_input: Option<String>,
+    pub create_branch_input: Option<String>,
 }
 
 impl Default for TuiApp {
@@ -68,6 +80,10 @@ impl Default for TuiApp {
             home_selected: 0,
             ws_selected_file: 0,
             ws_selected_commit: 0,
+            ws_selected_local_branch: 0,
+            ws_selected_remote_branch: 0,
+            ws_branch_sub_pane: BranchSubPane::Local,
+            ws_pending_select_head_branch: false,
             ws_diff_scroll: 0,
             flash_on: false,
             add_workspace_path_input: None,
@@ -76,6 +92,7 @@ impl Default for TuiApp {
             rename_tab_input: None,
             git_action_message: None,
             commit_input: None,
+            create_branch_input: None,
         }
     }
 }
@@ -316,6 +333,7 @@ impl TuiApp {
     pub fn set_workspace_git(&mut self, id: WorkspaceId, git: GitState) {
         self.workspace_git.insert(id, git);
         self.clamp_selected_file();
+        self.clamp_selected_branches();
     }
 
     pub fn set_workspace_diff(&mut self, id: WorkspaceId, file: String, diff: String) {
@@ -478,6 +496,82 @@ impl TuiApp {
 
     pub fn is_committing(&self) -> bool {
         self.commit_input.is_some()
+    }
+
+    pub fn is_creating_branch(&self) -> bool {
+        self.create_branch_input.is_some()
+    }
+
+    pub fn begin_create_branch(&mut self) {
+        self.create_branch_input = Some(String::new());
+    }
+
+    pub fn cancel_create_branch(&mut self) {
+        self.create_branch_input = None;
+    }
+
+    pub fn move_branch_selection(&mut self, delta: isize) {
+        let Some(id) = self.active_workspace_id() else { return };
+        let Some(git) = self.workspace_git.get(&id) else { return };
+        match self.ws_branch_sub_pane {
+            BranchSubPane::Local => {
+                if git.local_branches.is_empty() {
+                    self.ws_selected_local_branch = 0;
+                    return;
+                }
+                let len = git.local_branches.len() as isize;
+                let next = (self.ws_selected_local_branch as isize + delta).clamp(0, len - 1);
+                self.ws_selected_local_branch = next as usize;
+            }
+            BranchSubPane::Remote => {
+                if git.remote_branches.is_empty() {
+                    self.ws_selected_remote_branch = 0;
+                    return;
+                }
+                let len = git.remote_branches.len() as isize;
+                let next = (self.ws_selected_remote_branch as isize + delta).clamp(0, len - 1);
+                self.ws_selected_remote_branch = next as usize;
+            }
+        }
+    }
+
+    pub fn selected_local_branch(&self) -> Option<&BranchInfo> {
+        let id = self.active_workspace_id()?;
+        let git = self.workspace_git.get(&id)?;
+        git.local_branches.get(self.ws_selected_local_branch)
+    }
+
+    pub fn selected_remote_branch(&self) -> Option<&RemoteBranchInfo> {
+        let id = self.active_workspace_id()?;
+        let git = self.workspace_git.get(&id)?;
+        git.remote_branches.get(self.ws_selected_remote_branch)
+    }
+
+    pub fn toggle_branch_sub_pane(&mut self, direction: BranchSubPane) {
+        self.ws_branch_sub_pane = direction;
+    }
+
+    fn clamp_selected_branches(&mut self) {
+        let Some(id) = self.active_workspace_id() else { return };
+        if let Some(git) = self.workspace_git.get(&id) {
+            if git.local_branches.is_empty() {
+                self.ws_selected_local_branch = 0;
+            } else if self.ws_selected_local_branch >= git.local_branches.len() {
+                self.ws_selected_local_branch = git.local_branches.len() - 1;
+            }
+            if git.remote_branches.is_empty() {
+                self.ws_selected_remote_branch = 0;
+            } else if self.ws_selected_remote_branch >= git.remote_branches.len() {
+                self.ws_selected_remote_branch = git.remote_branches.len() - 1;
+            }
+            if self.ws_pending_select_head_branch {
+                if let Some(idx) = git.local_branches.iter().position(|b| b.is_head) {
+                    self.ws_selected_local_branch = idx;
+                    self.ws_branch_sub_pane = BranchSubPane::Local;
+                }
+                self.ws_pending_select_head_branch = false;
+            }
+        }
     }
 
     fn clamp_selected_file(&mut self) {

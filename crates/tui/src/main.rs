@@ -359,6 +359,7 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                         && !app.is_renaming_workspace()
                         && !app.is_renaming_tab()
                         && !app.is_committing()
+                        && !app.is_creating_branch()
                         && !matches!(app.focus, app::Focus::WsTerminal)
                     {
                         break;
@@ -531,6 +532,39 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                 continue;
                             }
 
+                            if app.is_creating_branch() {
+                                match key.code {
+                                    KeyCode::Esc => { app.cancel_create_branch(); }
+                                    KeyCode::Enter => {
+                                        if let Some(name) = app.create_branch_input.take() {
+                                            let trimmed = name.trim().to_string();
+                                            if !trimmed.is_empty() {
+                                                app.ws_pending_select_head_branch = true;
+                                                let _ = backend
+                                                    .cmd_tx
+                                                    .send(Command::GitCreateBranch {
+                                                        id,
+                                                        branch: trimmed,
+                                                    })
+                                                    .await;
+                                            }
+                                        }
+                                    }
+                                    KeyCode::Backspace => {
+                                        if let Some(input) = app.create_branch_input.as_mut() {
+                                            input.pop();
+                                        }
+                                    }
+                                    KeyCode::Char(c) => {
+                                        if let Some(input) = app.create_branch_input.as_mut() {
+                                            input.push(c);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+
                             if app.is_committing() {
                                 match key.code {
                                     KeyCode::Esc => { app.commit_input = None; }
@@ -634,6 +668,9 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     app::Focus::WsLog => {
                                         app.move_workspace_commit_selection(1);
                                     }
+                                    app::Focus::WsBranches => {
+                                        app.move_branch_selection(1);
+                                    }
                                     app::Focus::WsDiff => {
                                         app.ws_diff_scroll = app.ws_diff_scroll.saturating_add(1)
                                     }
@@ -651,6 +688,9 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     }
                                     app::Focus::WsLog => {
                                         app.move_workspace_commit_selection(-1);
+                                    }
+                                    app::Focus::WsBranches => {
+                                        app.move_branch_selection(-1);
                                     }
                                     app::Focus::WsDiff => {
                                         app.ws_diff_scroll = app.ws_diff_scroll.saturating_sub(1)
@@ -695,33 +735,75 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                 {
                                     app.commit_input = Some(String::new());
                                 }
-                                KeyCode::Char('P')
-                                    if matches!(app.focus, app::Focus::WsFiles) =>
+                                KeyCode::Char('c')
+                                    if matches!(app.focus, app::Focus::WsBranches) =>
                                 {
-                                    // Push via terminal
-                                    let has_shell = app.ws_tabs.iter().any(|t| {
-                                        t.kind == TerminalKind::Shell
-                                    });
-                                    if has_shell {
-                                        let data_b64 =
-                                            base64::engine::general_purpose::STANDARD
-                                                .encode(b"git push\r");
-                                        let _ = backend
-                                            .cmd_tx
-                                            .send(Command::SendTerminalInput {
-                                                id,
-                                                kind: app.active_tab_kind(),
-                                                tab_id: Some(app.active_tab_id()),
-                                                data_b64,
-                                            })
-                                            .await;
-                                        app.focus = app::Focus::WsTerminal;
-                                    } else {
-                                        app.git_action_message = Some((
-                                            "No terminal - start a shell first".to_string(),
-                                            std::time::Instant::now(),
-                                        ));
+                                    if matches!(app.ws_branch_sub_pane, app::BranchSubPane::Local) {
+                                        app.begin_create_branch();
                                     }
+                                }
+                                KeyCode::Char('[')
+                                    if matches!(app.focus, app::Focus::WsBranches) =>
+                                {
+                                    app.toggle_branch_sub_pane(app::BranchSubPane::Local);
+                                }
+                                KeyCode::Char(']')
+                                    if matches!(app.focus, app::Focus::WsBranches) =>
+                                {
+                                    app.toggle_branch_sub_pane(app::BranchSubPane::Remote);
+                                }
+                                KeyCode::Char(' ')
+                                    if matches!(app.focus, app::Focus::WsBranches) =>
+                                {
+                                    match app.ws_branch_sub_pane {
+                                        app::BranchSubPane::Local => {
+                                            if let Some(branch) = app.selected_local_branch() {
+                                                if !branch.is_head {
+                                                    let branch_name = branch.name.clone();
+                                                    let _ = backend
+                                                        .cmd_tx
+                                                        .send(Command::GitCheckoutBranch {
+                                                            id,
+                                                            branch: branch_name,
+                                                        })
+                                                        .await;
+                                                }
+                                            }
+                                        }
+                                        app::BranchSubPane::Remote => {
+                                            if let Some(rb) = app.selected_remote_branch() {
+                                                let full = rb.full_name.clone();
+                                                if let Some(local_name) = full.splitn(2, '/').nth(1) {
+                                                    let local_name = local_name.to_string();
+                                                    app.ws_pending_select_head_branch = true;
+                                                    app.ws_branch_sub_pane = app::BranchSubPane::Local;
+                                                    let _ = backend
+                                                        .cmd_tx
+                                                        .send(Command::GitCheckoutRemoteBranch {
+                                                            id,
+                                                            remote_branch: full,
+                                                            local_name,
+                                                        })
+                                                        .await;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Char('p')
+                                    if matches!(app.focus, app::Focus::WsBranches) =>
+                                {
+                                    let _ = backend.cmd_tx.send(Command::GitPull { id }).await;
+                                }
+                                KeyCode::Char('f')
+                                    if matches!(app.focus, app::Focus::WsBranches) =>
+                                {
+                                    let _ = backend.cmd_tx.send(Command::GitFetch { id }).await;
+                                }
+                                KeyCode::Char('P')
+                                    if matches!(app.focus, app::Focus::WsBranches) =>
+                                {
+                                    let _ = backend.cmd_tx.send(Command::GitPush { id }).await;
                                 }
                                 KeyCode::Char('e') if matches!(app.focus, app::Focus::WsHeader) => {
                                     app.begin_rename_workspace();
@@ -915,7 +997,8 @@ fn cycle_workspace_focus(focus: app::Focus) -> app::Focus {
         app::Focus::WsTerminalTabs => app::Focus::WsTerminal,
         app::Focus::WsTerminal => app::Focus::WsFiles,
         app::Focus::WsFiles => app::Focus::WsLog,
-        app::Focus::WsLog => app::Focus::WsDiff,
+        app::Focus::WsLog => app::Focus::WsBranches,
+        app::Focus::WsBranches => app::Focus::WsDiff,
         app::Focus::WsDiff => app::Focus::WsHeader,
         _ => app::Focus::WsTerminalTabs,
     }
@@ -928,7 +1011,8 @@ fn cycle_workspace_focus_reverse(focus: app::Focus) -> app::Focus {
         app::Focus::WsTerminal => app::Focus::WsTerminalTabs,
         app::Focus::WsFiles => app::Focus::WsTerminal,
         app::Focus::WsLog => app::Focus::WsFiles,
-        app::Focus::WsDiff => app::Focus::WsLog,
+        app::Focus::WsBranches => app::Focus::WsLog,
+        app::Focus::WsDiff => app::Focus::WsBranches,
         _ => app::Focus::WsTerminalTabs,
     }
 }
@@ -1115,6 +1199,17 @@ async fn handle_mouse(
                         ui::screens::workspace::WorkspaceHit::LogList(idx) => {
                             app.focus = app::Focus::WsLog;
                             app.ws_selected_commit = idx;
+                        }
+                        ui::screens::workspace::WorkspaceHit::BranchesPane(idx) => {
+                            app.focus = app::Focus::WsBranches;
+                            match app.ws_branch_sub_pane {
+                                app::BranchSubPane::Local => {
+                                    app.ws_selected_local_branch = idx;
+                                }
+                                app::BranchSubPane::Remote => {
+                                    app.ws_selected_remote_branch = idx;
+                                }
+                            }
                         }
                         ui::screens::workspace::WorkspaceHit::DiffPane => {
                             app.focus = app::Focus::WsDiff;

@@ -53,6 +53,19 @@ pub struct CommitInfo {
     pub date: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchInfo {
+    pub name: String,
+    pub is_head: bool,
+    pub ahead: Option<u32>,
+    pub behind: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteBranchInfo {
+    pub full_name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GitState {
     pub branch: Option<String>,
@@ -61,6 +74,8 @@ pub struct GitState {
     pub behind: Option<u32>,
     pub changed: Vec<ChangedFile>,
     pub recent_commits: Vec<CommitInfo>,
+    pub local_branches: Vec<BranchInfo>,
+    pub remote_branches: Vec<RemoteBranchInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,6 +127,28 @@ pub enum Command {
     GitCommit {
         id: WorkspaceId,
         message: String,
+    },
+    GitCheckoutBranch {
+        id: WorkspaceId,
+        branch: String,
+    },
+    GitCheckoutRemoteBranch {
+        id: WorkspaceId,
+        remote_branch: String,
+        local_name: String,
+    },
+    GitCreateBranch {
+        id: WorkspaceId,
+        branch: String,
+    },
+    GitPush {
+        id: WorkspaceId,
+    },
+    GitPull {
+        id: WorkspaceId,
+    },
+    GitFetch {
+        id: WorkspaceId,
     },
     StartTerminal {
         id: WorkspaceId,

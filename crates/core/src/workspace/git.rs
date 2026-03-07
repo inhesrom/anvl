@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::Path;
 use tokio::process::Command;
 
-use protocol::{ChangedFile, CommitInfo, GitState};
+use protocol::{BranchInfo, ChangedFile, CommitInfo, GitState, RemoteBranchInfo};
 
 pub async fn refresh_git(repo: &Path) -> Result<GitState> {
     let branch_fut = Command::new("git")
@@ -17,9 +17,11 @@ pub async fn refresh_git(repo: &Path) -> Result<GitState> {
 
     let upstream_fut = get_upstream_status(repo);
     let commits_fut = get_recent_commits(repo, 20);
+    let local_branches_fut = get_local_branches(repo);
+    let remote_branches_fut = get_remote_branches(repo);
 
-    let (branch_out, status_out, (upstream, ahead, behind), recent_commits) =
-        tokio::join!(branch_fut, status_fut, upstream_fut, commits_fut);
+    let (branch_out, status_out, (upstream, ahead, behind), recent_commits, local_branches, remote_branches) =
+        tokio::join!(branch_fut, status_fut, upstream_fut, commits_fut, local_branches_fut, remote_branches_fut);
 
     let branch = match branch_out {
         Ok(out) if out.status.success() => {
@@ -47,6 +49,8 @@ pub async fn refresh_git(repo: &Path) -> Result<GitState> {
         behind,
         changed,
         recent_commits,
+        local_branches,
+        remote_branches,
     })
 }
 
@@ -265,6 +269,169 @@ pub async fn unstage_all(repo: &Path) -> Result<()> {
             "git reset failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
+    }
+    Ok(())
+}
+
+async fn get_local_branches(repo: &Path) -> Vec<BranchInfo> {
+    let out = Command::new("git")
+        .args(["for-each-ref", "--format=%(HEAD) %(refname:short) %(upstream:track)", "refs/heads/"])
+        .current_dir(repo)
+        .output()
+        .await;
+
+    let Ok(out) = out else { return Vec::new() };
+    if !out.status.success() {
+        return Vec::new();
+    }
+
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim_end();
+            if line.trim().is_empty() {
+                return None;
+            }
+            let is_head = line.starts_with('*');
+            let rest = &line[2..];
+            let (name, track) = if let Some(bracket_start) = rest.find('[') {
+                let name = rest[..bracket_start].trim().to_string();
+                let track_str = &rest[bracket_start..];
+                let (ahead, behind) = parse_track_info(track_str);
+                (name, (ahead, behind))
+            } else {
+                (rest.trim().to_string(), (None, None))
+            };
+            if name.is_empty() {
+                return None;
+            }
+            Some(BranchInfo {
+                name,
+                is_head,
+                ahead: track.0,
+                behind: track.1,
+            })
+        })
+        .collect()
+}
+
+fn parse_track_info(info: &str) -> (Option<u32>, Option<u32>) {
+    // Parses "[ahead N]", "[behind N]", "[ahead N, behind M]", or "[gone]"
+    let trimmed = info.trim().trim_start_matches('[').trim_end_matches(']');
+    if trimmed == "gone" || trimmed.is_empty() {
+        return (None, None);
+    }
+    let mut ahead = None;
+    let mut behind = None;
+    for part in trimmed.split(',') {
+        let part = part.trim();
+        if let Some(n) = part.strip_prefix("ahead ") {
+            ahead = n.trim().parse::<u32>().ok();
+        } else if let Some(n) = part.strip_prefix("behind ") {
+            behind = n.trim().parse::<u32>().ok();
+        }
+    }
+    (ahead, behind)
+}
+
+async fn get_remote_branches(repo: &Path) -> Vec<RemoteBranchInfo> {
+    let out = Command::new("git")
+        .args(["for-each-ref", "--format=%(refname:short)", "refs/remotes/"])
+        .current_dir(repo)
+        .output()
+        .await;
+
+    let Ok(out) = out else { return Vec::new() };
+    if !out.status.success() {
+        return Vec::new();
+    }
+
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty() && !line.trim().ends_with("/HEAD"))
+        .map(|line| RemoteBranchInfo {
+            full_name: line.trim().to_string(),
+        })
+        .collect()
+}
+
+pub async fn create_branch(repo: &Path, branch: &str) -> Result<()> {
+    let out = Command::new("git")
+        .args(["checkout", "-b", branch])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git checkout -b failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+pub async fn checkout_branch(repo: &Path, branch: &str) -> Result<()> {
+    let out = Command::new("git")
+        .args(["checkout", branch])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git checkout failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+pub async fn checkout_remote_branch(repo: &Path, remote_branch: &str, local_name: &str) -> Result<()> {
+    let out = Command::new("git")
+        .args(["checkout", "-b", local_name, remote_branch])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git checkout failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(())
+}
+
+pub async fn git_push(repo: &Path) -> Result<()> {
+    let out = Command::new("git")
+        .args(["push", "-u", "origin", "HEAD"])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!("git push failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    Ok(())
+}
+
+pub async fn git_pull(repo: &Path) -> Result<()> {
+    let out = Command::new("git")
+        .args(["pull"])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!("git pull failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    Ok(())
+}
+
+pub async fn git_fetch(repo: &Path) -> Result<()> {
+    let out = Command::new("git")
+        .args(["fetch"])
+        .current_dir(repo)
+        .output()
+        .await?;
+    if !out.status.success() {
+        anyhow::bail!("git fetch failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     Ok(())
 }

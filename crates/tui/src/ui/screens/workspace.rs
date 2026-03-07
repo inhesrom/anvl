@@ -17,6 +17,7 @@ pub enum WorkspaceHit {
     TerminalPane,
     FilesList(usize),
     LogList(usize),
+    BranchesPane(usize),
     DiffPane,
 }
 
@@ -27,6 +28,7 @@ struct WorkspaceLayout {
     terminal_pane: Rect,
     git_files: Rect,
     git_log: Rect,
+    git_branches: Rect,
     git_diff: Rect,
     footer: Rect,
 }
@@ -48,6 +50,7 @@ fn layout(area: Rect, focus: crate::app::Focus) -> WorkspaceLayout {
             }
             crate::app::Focus::WsFiles
             | crate::app::Focus::WsLog
+            | crate::app::Focus::WsBranches
             | crate::app::Focus::WsDiff => {
                 [Constraint::Percentage(35), Constraint::Percentage(65)]
             }
@@ -63,10 +66,14 @@ fn layout(area: Rect, focus: crate::app::Focus) -> WorkspaceLayout {
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(body[1]);
 
-    // Split left pane into files (top) + commit log (bottom)
+    // Split left pane into files (top) + commit log (middle) + branches (bottom)
     let left_split = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Percentage(33),
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+        ])
         .split(git_area[0]);
 
     WorkspaceLayout {
@@ -75,6 +82,7 @@ fn layout(area: Rect, focus: crate::app::Focus) -> WorkspaceLayout {
         terminal_pane: terminal_area[1],
         git_files: left_split[0],
         git_log: left_split[1],
+        git_branches: left_split[2],
         git_diff: git_area[1],
         footer: chunks[2],
     }
@@ -239,6 +247,171 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         );
     frame.render_stateful_widget(commit_list, l.git_log, &mut commit_list_state);
 
+    // --- Branches Pane ---
+    {
+        let branch_split = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(l.git_branches);
+
+        let is_branches_focused = app.focus == crate::app::Focus::WsBranches;
+        let local_active = matches!(app.ws_branch_sub_pane, crate::app::BranchSubPane::Local);
+        let remote_active = matches!(app.ws_branch_sub_pane, crate::app::BranchSubPane::Remote);
+
+        // Local branches
+        let local_branches = ws_id
+            .and_then(|id| app.workspace_git.get(&id))
+            .map(|g| g.local_branches.clone())
+            .unwrap_or_default();
+        let mut local_list_state = ListState::default();
+        if !local_branches.is_empty() {
+            local_list_state.select(Some(
+                app.ws_selected_local_branch.min(local_branches.len() - 1),
+            ));
+        }
+        let local_items = local_branches
+            .iter()
+            .map(|b| {
+                let mut spans = Vec::new();
+                if b.is_head {
+                    spans.push(Span::styled(
+                        "* ",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    spans.push(Span::raw("  "));
+                }
+                let name_style = if b.is_head {
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+                spans.push(Span::styled(b.name.clone(), name_style));
+                // Ahead/behind indicators
+                match (b.ahead, b.behind) {
+                    (Some(a), Some(b_count)) if a == 0 && b_count == 0 => {
+                        spans.push(Span::styled(
+                            " =",
+                            Style::default().add_modifier(Modifier::DIM),
+                        ));
+                    }
+                    (ahead, behind) => {
+                        if let Some(a) = ahead {
+                            if a > 0 {
+                                spans.push(Span::styled(
+                                    format!(" \u{2191}{a}"),
+                                    Style::default().fg(Color::Green),
+                                ));
+                            }
+                        }
+                        if let Some(b_count) = behind {
+                            if b_count > 0 {
+                                spans.push(Span::styled(
+                                    format!(" \u{2193}{b_count}"),
+                                    Style::default().fg(Color::Red),
+                                ));
+                            }
+                        }
+                    }
+                }
+                ListItem::new(Line::from(spans))
+            })
+            .collect::<Vec<_>>();
+
+        let local_title = if is_branches_focused && local_active {
+            "Local [*]"
+        } else {
+            "Local"
+        };
+        let (local_style, local_border_type) = if is_branches_focused && local_active {
+            (
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD),
+                BorderType::Thick,
+            )
+        } else {
+            (
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::DIM),
+                BorderType::Plain,
+            )
+        };
+        let local_list = List::new(local_items)
+            .block(
+                Block::default()
+                    .title(local_title)
+                    .borders(Borders::ALL)
+                    .border_style(local_style)
+                    .border_type(local_border_type),
+            )
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            );
+        frame.render_stateful_widget(local_list, branch_split[0], &mut local_list_state);
+
+        // Remote branches
+        let remote_branches = ws_id
+            .and_then(|id| app.workspace_git.get(&id))
+            .map(|g| g.remote_branches.clone())
+            .unwrap_or_default();
+        let mut remote_list_state = ListState::default();
+        if !remote_branches.is_empty() {
+            remote_list_state.select(Some(
+                app.ws_selected_remote_branch
+                    .min(remote_branches.len() - 1),
+            ));
+        }
+        let remote_items = remote_branches
+            .iter()
+            .map(|b| ListItem::new(Line::from(Span::raw(format!("  {}", b.full_name)))))
+            .collect::<Vec<_>>();
+
+        let remote_title = if is_branches_focused && remote_active {
+            "Remote [*]"
+        } else {
+            "Remote"
+        };
+        let (remote_style, remote_border_type) = if is_branches_focused && remote_active {
+            (
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD),
+                BorderType::Thick,
+            )
+        } else {
+            (
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::DIM),
+                BorderType::Plain,
+            )
+        };
+        let remote_list = List::new(remote_items)
+            .block(
+                Block::default()
+                    .title(remote_title)
+                    .borders(Borders::ALL)
+                    .border_style(remote_style)
+                    .border_type(remote_border_type),
+            )
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            );
+        frame.render_stateful_widget(remote_list, branch_split[1], &mut remote_list_state);
+    }
+
     // --- Diff Pane ---
     let diff_text = ws_id
         .and_then(|id| app.workspace_diff.get(&id))
@@ -376,6 +549,35 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         }
     }
 
+    // --- Create Branch modal ---
+    if let Some(input) = &app.create_branch_input {
+        let modal_w = 60u16.min(area.width.saturating_sub(4));
+        let modal_h = 5u16;
+        let modal_rect = Rect::new(
+            area.x + (area.width.saturating_sub(modal_w)) / 2,
+            area.y + (area.height.saturating_sub(modal_h)) / 2,
+            modal_w,
+            modal_h,
+        );
+        frame.render_widget(Clear, modal_rect);
+        frame.render_widget(
+            Paragraph::new(format!("{input}_"))
+                .block(
+                    Block::default()
+                        .title("New Branch (Enter to create, Esc to cancel)")
+                        .borders(Borders::ALL)
+                        .border_style(
+                            Style::default()
+                                .fg(Color::LightBlue)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .border_type(BorderType::Thick),
+                )
+                .wrap(Wrap { trim: false }),
+            modal_rect,
+        );
+    }
+
     // --- Commit modal ---
     if let Some(input) = &app.commit_input {
         let modal_w = 60u16.min(area.width.saturating_sub(4));
@@ -446,6 +648,14 @@ pub fn hit_test(area: Rect, app: &TuiApp, x: u16, y: u16) -> Option<WorkspaceHit
         }
         let idx = (y - content_top) as usize;
         return Some(WorkspaceHit::LogList(idx.min(commit_count - 1)));
+    }
+    if point_inside(l.git_branches) {
+        let content_top = l.git_branches.y.saturating_add(1);
+        if y < content_top {
+            return Some(WorkspaceHit::BranchesPane(0));
+        }
+        let idx = (y - content_top) as usize;
+        return Some(WorkspaceHit::BranchesPane(idx));
     }
     if point_inside(l.git_files) {
         let ws_id = match app.route {
