@@ -222,8 +222,6 @@ pub struct TuiApp {
     pub git_op_in_progress: HashSet<WorkspaceId>,
     pub settings_open: bool,
     pub settings_selected: usize,
-    /// When true, Esc and Tab are forwarded to the terminal instead of being intercepted.
-    pub terminal_passthrough: bool,
     pub mouse_selection: Option<MouseSelection>,
     /// Set on mouse-up to request clipboard copy on the next frame render.
     pub pending_copy_selection: Option<MouseSelection>,
@@ -267,7 +265,6 @@ impl Default for TuiApp {
             settings: load_settings(),
             settings_open: false,
             settings_selected: 0,
-            terminal_passthrough: false,
             mouse_selection: None,
             pending_copy_selection: None,
         }
@@ -308,7 +305,6 @@ impl TuiApp {
         self.persist_tabs_for_active_workspace();
         self.route = Route::Home;
         self.focus = Focus::HomeGrid;
-        self.terminal_passthrough = false;
     }
 
     pub fn move_home_selection(&mut self, dx: isize, dy: isize) {
@@ -348,6 +344,15 @@ impl TuiApp {
 
     pub fn active_tab_kind(&self) -> TerminalKind {
         self.active_tab().kind
+    }
+
+    pub fn active_tab_passthrough(&self) -> bool {
+        self.active_tab().passthrough
+    }
+
+    pub fn toggle_active_tab_passthrough(&mut self) {
+        let idx = self.ws_active_tab.min(self.ws_tabs.len().saturating_sub(1));
+        self.ws_tabs[idx].passthrough = !self.ws_tabs[idx].passthrough;
     }
 
     pub fn move_terminal_tab(&mut self, delta: isize) {
@@ -943,6 +948,7 @@ impl WorkspaceTabsState {
                     id: t.id.clone(),
                     label: t.label.clone(),
                     kind: t.kind,
+                    passthrough: false,
                 })
                 .collect(),
             active: saved.active,
@@ -1030,6 +1036,8 @@ pub struct TerminalTab {
     pub id: String,
     pub label: String,
     pub kind: TerminalKind,
+    /// When true, Esc and Tab are forwarded to the terminal instead of being intercepted.
+    pub passthrough: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1070,6 +1078,7 @@ impl TerminalTab {
             id: "agent".to_string(),
             label: "agent".to_string(),
             kind: TerminalKind::Agent,
+            passthrough: false,
         }
     }
 
@@ -1078,6 +1087,7 @@ impl TerminalTab {
             id,
             label,
             kind: TerminalKind::Shell,
+            passthrough: false,
         }
     }
 }

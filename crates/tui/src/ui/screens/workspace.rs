@@ -630,7 +630,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         .unwrap_or_else(|| vec![Line::from("No terminal output yet.")]);
     let (term_style, term_border_type) =
         pane_border_style(app.focus == crate::app::Focus::WsTerminal, attention, app.flash_on);
-    let term_title = build_terminal_title_line(attention, app.flash_on, app.terminal_passthrough);
+    let term_title = build_terminal_title_line(attention, app.flash_on, app.active_tab_passthrough());
     frame.render_widget(Clear, l.terminal_pane);
     frame.render_widget(
         Paragraph::new(terminal_lines).block(

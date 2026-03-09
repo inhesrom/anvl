@@ -731,13 +731,13 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                 && key.modifiers.contains(KeyModifiers::CONTROL)
                                 && matches!(app.focus, app::Focus::WsTerminal)
                             {
-                                app.terminal_passthrough = !app.terminal_passthrough;
+                                app.toggle_active_tab_passthrough();
                                 continue;
                             }
 
                             // In passthrough mode, forward everything (including Esc/Tab)
                             // to the terminal.
-                            if app.terminal_passthrough
+                            if app.active_tab_passthrough()
                                 && matches!(app.focus, app::Focus::WsTerminal)
                             {
                                 if let Some(bytes) = key_to_terminal_bytes(key) {
