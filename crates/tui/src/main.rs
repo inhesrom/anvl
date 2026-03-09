@@ -42,6 +42,7 @@ enum LaunchMode {
 struct Cli {
     mode: LaunchMode,
     detach: bool,
+    version: bool,
 }
 
 struct Backend {
@@ -64,6 +65,10 @@ struct SessionRegistry {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = parse_cli(std::env::args().skip(1).collect::<Vec<_>>())?;
+    if cli.version {
+        println!("anvl {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     match cli.mode {
         LaunchMode::RunDaemon { name, port } => run_daemon(name, port).await,
         LaunchMode::RemoveSession { name } => delete_session(&name),
@@ -131,6 +136,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli> {
     let mut i = 0usize;
     let mut mode = LaunchMode::Local;
     let mut detach = false;
+    let mut version = false;
     let mut daemon_port: Option<u16> = None;
     let mut daemon_name: Option<String> = None;
 
@@ -156,6 +162,10 @@ fn parse_cli(args: Vec<String>) -> Result<Cli> {
                 };
                 mode = LaunchMode::RemoveSession { name };
                 i += 2;
+            }
+            "-V" | "--version" => {
+                version = true;
+                i += 1;
             }
             "-d" | "--detach" => {
                 detach = true;
@@ -202,6 +212,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli> {
                 port: daemon_port.unwrap_or(3001),
             },
             detach,
+            version,
         });
     }
 
@@ -216,7 +227,7 @@ fn parse_cli(args: Vec<String>) -> Result<Cli> {
         ));
     }
 
-    Ok(Cli { mode, detach })
+    Ok(Cli { mode, detach, version })
 }
 
 async fn run_daemon(name: Option<String>, port: u16) -> Result<()> {
