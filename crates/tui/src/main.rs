@@ -2,10 +2,12 @@ mod app;
 mod keymap;
 mod ui;
 
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::process::{Command as OsCommand, Stdio};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use app::TuiApp;
 use base64::Engine as _;
 use crossterm::{
@@ -19,26 +21,230 @@ use crossterm::{
 use anvl_core::{spawn_core, CoreHandle};
 use protocol::{AttentionLevel, Command, Event as CoreEvent, Route, TerminalKind};
 use ratatui::{backend::CrosstermBackend, Terminal};
+use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
+
+#[derive(Debug)]
+enum LaunchMode {
+    Local,
+    CreateSession { name: String },
+    AttachSession { name: String },
+    RemoveSession { name: String },
+    ListSessions,
+    RunDaemon { name: String },
+}
+
+#[derive(Debug)]
+struct Cli {
+    mode: LaunchMode,
+    detach: bool,
+    version: bool,
+    help: bool,
+}
 
 struct Backend {
     cmd_tx: mpsc::Sender<Command>,
     evt_rx: mpsc::Receiver<CoreEvent>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SessionEntry {
+    name: String,
+    socket_path: String,
+    pid: u32,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SessionRegistry {
+    sessions: Vec<SessionEntry>,
+}
+
+fn print_help() {
+    println!(
+        "\
+anvl {}
+
+USAGE:
+    anvl [OPTIONS]
+
+OPTIONS:
+    -s, --session <name>   Create (or reattach to) a named session
+    -a <name>              Attach to an existing session
+    -r, --remove <name>    Remove a session (stops its daemon)
+    -l, --list             List active sessions
+    -d, --detach           Start session in background only (with -s or -a)
+    -V, --version          Print version
+    -h, --help             Print this help
+
+EXAMPLES:
+    anvl                   Launch in local (non-session) mode
+    anvl -s work           Create or reattach to session 'work'
+    anvl -s work -d        Start session 'work' in background
+    anvl -a work           Attach to running session 'work'
+    anvl -l                List sessions
+    anvl -r work           Remove session 'work'",
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
+fn parse_cli(args: Vec<String>) -> Result<Cli> {
+    let mut i = 0usize;
+    let mut mode = LaunchMode::Local;
+    let mut detach = false;
+    let mut version = false;
+    let mut help = false;
+    let mut daemon_name: Option<String> = None;
+
+    while i < args.len() {
+        match args[i].as_str() {
+            "-s" | "--session" => {
+                let Some(name) = args.get(i + 1).cloned() else {
+                    return Err(anyhow!("missing session name for {}", args[i]));
+                };
+                mode = LaunchMode::CreateSession { name };
+                i += 2;
+            }
+            "-a" => {
+                let Some(name) = args.get(i + 1).cloned() else {
+                    return Err(anyhow!("missing session name for -a"));
+                };
+                mode = LaunchMode::AttachSession { name };
+                i += 2;
+            }
+            "-r" | "--remove" => {
+                let Some(name) = args.get(i + 1).cloned() else {
+                    return Err(anyhow!("missing session name for {}", args[i]));
+                };
+                mode = LaunchMode::RemoveSession { name };
+                i += 2;
+            }
+            "-V" | "--version" => {
+                version = true;
+                i += 1;
+            }
+            "-d" | "--detach" => {
+                detach = true;
+                i += 1;
+            }
+            "-l" | "--list" => {
+                mode = LaunchMode::ListSessions;
+                i += 1;
+            }
+            "-h" | "--help" => {
+                help = true;
+                i += 1;
+            }
+            "--run-daemon" => {
+                mode = LaunchMode::RunDaemon {
+                    name: String::new(),
+                };
+                i += 1;
+            }
+            "--session-name" => {
+                let Some(name) = args.get(i + 1).cloned() else {
+                    return Err(anyhow!("missing name for --session-name"));
+                };
+                daemon_name = Some(name);
+                i += 2;
+            }
+            other => {
+                return Err(anyhow!("unknown argument: {other}"));
+            }
+        }
+    }
+
+    if matches!(mode, LaunchMode::RunDaemon { .. }) {
+        let name = daemon_name.unwrap_or_default();
+        return Ok(Cli {
+            mode: LaunchMode::RunDaemon { name },
+            detach,
+            version,
+            help,
+        });
+    }
+
+    if detach
+        && matches!(
+            mode,
+            LaunchMode::RemoveSession { .. } | LaunchMode::ListSessions
+        )
+    {
+        return Err(anyhow!(
+            "--detach is only valid with session create/attach (-s or -a)"
+        ));
+    }
+
+    Ok(Cli {
+        mode,
+        detach,
+        version,
+        help,
+    })
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.iter().any(|a| a == "-V" || a == "--version") {
+    let cli = parse_cli(std::env::args().skip(1).collect::<Vec<_>>())?;
+    if cli.help {
+        print_help();
+        return Ok(());
+    }
+    if cli.version {
         println!("anvl {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    if let Some(arg) = args.first() {
-        return Err(anyhow!("unknown argument: {arg}"));
+    match cli.mode {
+        LaunchMode::RunDaemon { name } => run_daemon(&name).await,
+        LaunchMode::RemoveSession { name } => delete_session(&name),
+        LaunchMode::ListSessions => list_sessions(),
+        LaunchMode::CreateSession { name } => {
+            let entry = ensure_session_running(&name).await?;
+            if cli.detach {
+                println!(
+                    "session '{}' running in background (detached)",
+                    entry.name
+                );
+                return Ok(());
+            }
+            let backend = build_remote_backend(&entry.socket_path).await?;
+            run_tui(backend).await
+        }
+        LaunchMode::AttachSession { name } => {
+            let entry = get_session(&name)?.ok_or_else(|| {
+                anyhow!(
+                    "session '{}' not found. create it with: anvl -s {}",
+                    name,
+                    name
+                )
+            })?;
+            if !socket_alive(&entry.socket_path) {
+                return Err(anyhow!(
+                    "session '{}' exists but its socket is not reachable",
+                    name,
+                ));
+            }
+            if cli.detach {
+                println!(
+                    "session '{}' is running (detached)",
+                    entry.name
+                );
+                return Ok(());
+            }
+            let backend = build_remote_backend(&entry.socket_path).await?;
+            run_tui(backend).await
+        }
+        LaunchMode::Local => {
+            if cli.detach {
+                return Err(anyhow!(
+                    "--detach requires a named session: use `anvl -s <name> -d` or `anvl -a <name> -d`"
+                ));
+            }
+            let (backend, _core) = build_local_backend();
+            run_tui(backend).await
+        }
     }
-    let (backend, _core) = build_local_backend();
-    run_tui(backend).await
 }
 
 fn build_local_backend() -> (Backend, CoreHandle) {
@@ -62,6 +268,384 @@ fn build_local_backend() -> (Backend, CoreHandle) {
     });
 
     (Backend { cmd_tx, evt_rx }, core)
+}
+
+// ---------------------------------------------------------------------------
+// Unix-domain-socket session infrastructure
+// ---------------------------------------------------------------------------
+
+fn session_socket_dir() -> Result<PathBuf> {
+    let base = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        PathBuf::from(xdg)
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".config")
+    } else {
+        return Err(anyhow!("cannot determine config directory"));
+    };
+    Ok(base.join("anvl").join("sessions"))
+}
+
+fn session_socket_path(name: &str) -> Result<PathBuf> {
+    let safe = sanitize_session_name(name);
+    Ok(session_socket_dir()?.join(format!("{safe}.sock")))
+}
+
+/// 4-byte big-endian length prefix + JSON payload.
+async fn read_frame<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> Result<Option<Vec<u8>>> {
+    let mut len_buf = [0u8; 4];
+    match r.read_exact(&mut len_buf).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e.into()),
+    }
+    let len = u32::from_be_bytes(len_buf) as usize;
+    if len > 16 * 1024 * 1024 {
+        return Err(anyhow!("frame too large: {} bytes", len));
+    }
+    let mut buf = vec![0u8; len];
+    r.read_exact(&mut buf).await?;
+    Ok(Some(buf))
+}
+
+async fn write_frame<W: tokio::io::AsyncWrite + Unpin>(w: &mut W, data: &[u8]) -> Result<()> {
+    let len = (data.len() as u32).to_be_bytes();
+    w.write_all(&len).await?;
+    w.write_all(data).await?;
+    w.flush().await?;
+    Ok(())
+}
+
+async fn run_daemon(name: &str) -> Result<()> {
+    let sock_path = session_socket_path(name)?;
+    if let Some(parent) = sock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // Remove stale socket file if it exists
+    let _ = std::fs::remove_file(&sock_path);
+
+    let core = spawn_core();
+    let listener = tokio::net::UnixListener::bind(&sock_path)
+        .with_context(|| format!("failed to bind unix socket: {}", sock_path.display()))?;
+
+    // Clean up socket on exit
+    struct CleanupGuard(PathBuf);
+    impl Drop for CleanupGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _guard = CleanupGuard(sock_path.clone());
+
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let (mut reader, mut writer) = stream.into_split();
+        let cmd_tx = core.cmd_tx.clone();
+        let mut evt_rx = core.evt_tx.subscribe();
+
+        // Bridge: read Commands from socket, send Events back
+        tokio::spawn(async move {
+            let (local_evt_tx, mut local_evt_rx) = mpsc::channel::<CoreEvent>(1024);
+
+            // Forward broadcast events to local channel
+            tokio::spawn(async move {
+                loop {
+                    match evt_rx.recv().await {
+                        Ok(evt) => {
+                            if local_evt_tx.send(evt).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(RecvError::Closed) => break,
+                        Err(RecvError::Lagged(_)) => continue,
+                    }
+                }
+            });
+
+            // Write events to socket
+            let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(1024);
+            tokio::spawn(async move {
+                while let Some(data) = write_rx.recv().await {
+                    if write_frame(&mut writer, &data).await.is_err() {
+                        break;
+                    }
+                }
+            });
+
+            // Forward events to write channel
+            let write_tx2 = write_tx.clone();
+            tokio::spawn(async move {
+                while let Some(evt) = local_evt_rx.recv().await {
+                    if let Ok(payload) = serde_json::to_vec(&evt) {
+                        if write_tx2.send(payload).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            });
+
+            // Read commands from socket
+            loop {
+                match read_frame(&mut reader).await {
+                    Ok(Some(data)) => {
+                        if let Ok(cmd) = serde_json::from_slice::<Command>(&data) {
+                            if cmd_tx.send(cmd).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+}
+
+async fn build_remote_backend(socket_path: &str) -> Result<Backend> {
+    let stream = tokio::net::UnixStream::connect(socket_path)
+        .await
+        .with_context(|| format!("failed to connect to daemon socket: {socket_path}"))?;
+    let (mut reader, mut writer) = stream.into_split();
+
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(1024);
+    let (evt_tx, evt_rx) = mpsc::channel::<CoreEvent>(1024);
+
+    // Write commands to socket
+    tokio::spawn(async move {
+        while let Some(cmd) = cmd_rx.recv().await {
+            if let Ok(payload) = serde_json::to_vec(&cmd) {
+                if write_frame(&mut writer, &payload).await.is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
+    // Read events from socket
+    tokio::spawn(async move {
+        loop {
+            match read_frame(&mut reader).await {
+                Ok(Some(data)) => {
+                    if let Ok(evt) = serde_json::from_slice::<CoreEvent>(&data) {
+                        if evt_tx.send(evt).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+    });
+
+    Ok(Backend { cmd_tx, evt_rx })
+}
+
+// ---------------------------------------------------------------------------
+// Session management
+// ---------------------------------------------------------------------------
+
+async fn ensure_session_running(name: &str) -> Result<SessionEntry> {
+    let mut registry = load_registry()?;
+    if let Some(existing) = registry.sessions.iter().find(|s| s.name == name).cloned() {
+        if socket_alive(&existing.socket_path) {
+            return Ok(existing);
+        }
+        registry.sessions.retain(|s| s.name != name);
+    }
+
+    let pid = spawn_daemon_process(name)?;
+    let sock_path = session_socket_path(name)?;
+    let sock_str = sock_path.display().to_string();
+
+    wait_for_socket(&sock_str, Duration::from_secs(8)).await?;
+
+    let entry = SessionEntry {
+        name: name.to_string(),
+        socket_path: sock_str,
+        pid,
+    };
+    registry.sessions.retain(|s| s.name != name);
+    registry.sessions.push(entry.clone());
+    save_registry(&registry)?;
+    Ok(entry)
+}
+
+fn get_session(name: &str) -> Result<Option<SessionEntry>> {
+    let registry = load_registry()?;
+    Ok(registry.sessions.into_iter().find(|s| s.name == name))
+}
+
+fn delete_session(name: &str) -> Result<()> {
+    let mut registry = load_registry()?;
+    let Some(entry) = registry.sessions.iter().find(|s| s.name == name).cloned() else {
+        println!("session '{}' not found", name);
+        return Ok(());
+    };
+
+    print!(
+        "Delete session '{}'? This will stop running terminals. [y/N]: ",
+        entry.name
+    );
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let confirm = matches!(input.trim().to_lowercase().as_str(), "y" | "yes");
+    if !confirm {
+        println!("aborted");
+        return Ok(());
+    }
+
+    if is_expected_daemon_process(&entry) {
+        let _ = OsCommand::new("kill").arg(entry.pid.to_string()).status();
+    } else {
+        println!(
+            "warning: pid {} does not look like session daemon '{}'; skipping kill and removing registry entry only",
+            entry.pid, entry.name
+        );
+    }
+
+    // Clean up socket file
+    let _ = std::fs::remove_file(&entry.socket_path);
+
+    registry.sessions.retain(|s| s.name != name);
+    save_registry(&registry)?;
+    if let Some(path) = session_workspaces_persist_path(name) {
+        let _ = std::fs::remove_file(path);
+    }
+    println!("deleted session '{}'", name);
+    Ok(())
+}
+
+fn list_sessions() -> Result<()> {
+    let registry = load_registry()?;
+    if registry.sessions.is_empty() {
+        println!("no sessions");
+        return Ok(());
+    }
+
+    println!("sessions:");
+    for s in registry.sessions {
+        let state = if socket_alive(&s.socket_path) {
+            "running"
+        } else {
+            "stale"
+        };
+        println!("- {}  (pid {} {})", s.name, s.pid, state);
+    }
+    Ok(())
+}
+
+fn spawn_daemon_process(name: &str) -> Result<u32> {
+    let exe = std::env::current_exe()?;
+    let child = OsCommand::new(exe)
+        .arg("--run-daemon")
+        .arg("--session-name")
+        .arg(name)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("failed to spawn daemon for session '{}'", name))?;
+    Ok(child.id())
+}
+
+async fn wait_for_socket(path: &str, timeout: Duration) -> Result<()> {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if socket_alive(path) {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(120)).await;
+    }
+    Err(anyhow!("daemon did not become ready at {}", path))
+}
+
+fn socket_alive(path: &str) -> bool {
+    std::os::unix::net::UnixStream::connect(path).is_ok()
+}
+
+fn is_expected_daemon_process(entry: &SessionEntry) -> bool {
+    let output = match OsCommand::new("ps")
+        .arg("-p")
+        .arg(entry.pid.to_string())
+        .arg("-o")
+        .arg("command=")
+        .output()
+    {
+        Ok(out) => out,
+        Err(_) => return false,
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let cmdline = String::from_utf8_lossy(&output.stdout);
+    cmdline.contains("--run-daemon")
+        && cmdline.contains(&format!("--session-name {}", entry.name))
+}
+
+fn session_registry_path() -> Option<PathBuf> {
+    let base = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        PathBuf::from(xdg)
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home).join(".config")
+    } else {
+        return None;
+    };
+    Some(base.join("anvl").join("sessions.json"))
+}
+
+fn session_workspaces_persist_path(name: &str) -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    let safe = sanitize_session_name(name);
+    Some(
+        PathBuf::from(home)
+            .join(".config")
+            .join("anvl")
+            .join(format!("workspaces.{safe}.json")),
+    )
+}
+
+fn sanitize_session_name(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return "default".to_string();
+    }
+    let mut out = String::with_capacity(trimmed.len());
+    for c in trimmed.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    out
+}
+
+fn load_registry() -> Result<SessionRegistry> {
+    let Some(path) = session_registry_path() else {
+        return Ok(SessionRegistry::default());
+    };
+    if !path.exists() {
+        return Ok(SessionRegistry::default());
+    }
+    let raw = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read session registry: {}", path.display()))?;
+    let registry = serde_json::from_str::<SessionRegistry>(&raw).unwrap_or_default();
+    Ok(registry)
+}
+
+fn save_registry(registry: &SessionRegistry) -> Result<()> {
+    let Some(path) = session_registry_path() else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let raw = serde_json::to_string_pretty(registry)?;
+    std::fs::write(&path, raw)
+        .with_context(|| format!("failed to write session registry: {}", path.display()))?;
+    Ok(())
 }
 
 async fn run_tui(mut backend: Backend) -> Result<()> {
