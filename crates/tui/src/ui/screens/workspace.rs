@@ -625,11 +625,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
     }
 
     // --- Terminal Pane ---
+    let terminal_focused = app.focus == crate::app::Focus::WsTerminal;
     let terminal_lines = ws_id
         .map(|id| app.terminal_lines(id, &app.active_tab_id()))
         .unwrap_or_else(|| vec![Line::from("No terminal output yet.")]);
     let (term_style, term_border_type) =
-        pane_border_style(app.focus == crate::app::Focus::WsTerminal, attention, app.flash_on);
+        pane_border_style(terminal_focused, attention, app.flash_on);
     let term_title = build_terminal_title_line(attention, app.flash_on, app.active_tab_passthrough());
     frame.render_widget(Clear, l.terminal_pane);
     frame.render_widget(

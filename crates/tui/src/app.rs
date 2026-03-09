@@ -646,10 +646,16 @@ impl TuiApp {
                     style = style.add_modifier(Modifier::UNDERLINED);
                 }
                 if cell.inverse() {
-                    style = style.fg(bg).bg(fg);
+                    // When colors are Reset (terminal default), we must use explicit
+                    // colors so that swapping them produces a visible inversion.
+                    let inv_fg = if bg == TuiColor::Reset { TuiColor::Black } else { bg };
+                    let inv_bg = if fg == TuiColor::Reset { TuiColor::White } else { fg };
+                    style = style.fg(inv_fg).bg(inv_bg);
                 }
                 if show_cursor && r == cursor_row && c == cursor_col {
-                    style = style.add_modifier(Modifier::REVERSED);
+                    let cur_fg = if fg == TuiColor::Reset { TuiColor::Black } else { bg };
+                    let cur_bg = if fg == TuiColor::Reset { TuiColor::White } else { fg };
+                    style = style.fg(cur_fg).bg(cur_bg);
                 }
                 let text = if cell.has_contents() {
                     cell.contents()
