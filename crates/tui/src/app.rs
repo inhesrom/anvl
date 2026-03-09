@@ -243,7 +243,7 @@ impl Default for TuiApp {
                 TerminalTab::agent(),
                 TerminalTab::shell("shell".to_string(), "shell".to_string()),
             ],
-            ws_active_tab: 1,
+            ws_active_tab: 0,
             ws_next_shell_tab: 2,
             home_selected: 0,
             ws_selected_file: 0,
@@ -940,7 +940,7 @@ impl WorkspaceTabsState {
                 TerminalTab::agent(),
                 TerminalTab::shell("shell".to_string(), "shell".to_string()),
             ],
-            active: 1,
+            active: 0,
             next_shell_tab: 2,
         }
     }
