@@ -1193,6 +1193,7 @@ fn key_to_terminal_bytes(key: KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Enter => Some(vec![b'\r']),
         KeyCode::Backspace => Some(vec![0x7f]),
         KeyCode::Tab => Some(vec![b'\t']),
+        KeyCode::BackTab => Some(b"\x1b[Z".to_vec()),
         KeyCode::Left => Some(b"\x1b[D".to_vec()),
         KeyCode::Right => Some(b"\x1b[C".to_vec()),
         KeyCode::Up => Some(b"\x1b[A".to_vec()),
