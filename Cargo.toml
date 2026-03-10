@@ -7,5 +7,8 @@ members = [
   "crates/tui",
 ]
 
+[profile.dev.package.vt100]
+overflow-checks = false
+
 [workspace.package]
-version = "0.3.6"
+version = "0.3.7"
