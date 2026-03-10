@@ -24,9 +24,9 @@ struct GitRefreshResult {
 
 use workspace::attention::AttentionDetector;
 use workspace::git::{
-    checkout_branch, checkout_remote_branch, commit, create_branch, diff_commit, diff_file,
-    discard_file, git_fetch, git_pull, git_push, git_stash, git_stash_pull_pop, refresh_git, stage_all, stage_file,
-    unstage_all, unstage_file,
+    checkout_branch, checkout_remote_branch, commit, create_branch, diff_commit, diff_commit_file,
+    diff_file, discard_file, git_fetch, git_pull, git_push, git_stash, git_stash_pull_pop,
+    list_commit_files, refresh_git, stage_all, stage_file, unstage_all, unstage_file,
 };
 use workspace::ssh;
 use workspace::terminal::{start_terminal, TerminalOutput};
@@ -178,6 +178,52 @@ pub fn spawn_core() -> CoreHandle {
                                 let _ = evt_tx_task.send(Event::Error {
                                     message: format!(
                                         "LoadCommitDiff failed for {}: {err}",
+                                        path.display()
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+                Command::LoadCommitFiles { id, hash } => {
+                    if let Some(ws) = state.workspaces.get(&id) {
+                        let path = ws.path.clone();
+                        let ssh = ws.ssh.clone();
+                        match list_commit_files(&path, &hash, ssh.as_ref()).await {
+                            Ok(files) => {
+                                let _ = evt_tx_task.send(Event::CommitFilesLoaded {
+                                    id,
+                                    hash,
+                                    files,
+                                });
+                            }
+                            Err(err) => {
+                                let _ = evt_tx_task.send(Event::Error {
+                                    message: format!(
+                                        "LoadCommitFiles failed for {}: {err}",
+                                        path.display()
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+                Command::LoadCommitFileDiff { id, hash, file } => {
+                    if let Some(ws) = state.workspaces.get(&id) {
+                        let path = ws.path.clone();
+                        let ssh = ws.ssh.clone();
+                        match diff_commit_file(&path, &hash, &file, ssh.as_ref()).await {
+                            Ok(diff) => {
+                                let _ = evt_tx_task.send(Event::WorkspaceDiffUpdated {
+                                    id,
+                                    file: format!("{hash}:{file}"),
+                                    diff,
+                                });
+                            }
+                            Err(err) => {
+                                let _ = evt_tx_task.send(Event::Error {
+                                    message: format!(
+                                        "LoadCommitFileDiff failed for {}: {err}",
                                         path.display()
                                     ),
                                 });

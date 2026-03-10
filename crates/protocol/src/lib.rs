@@ -130,6 +130,15 @@ pub enum Command {
         id: WorkspaceId,
         hash: String,
     },
+    LoadCommitFiles {
+        id: WorkspaceId,
+        hash: String,
+    },
+    LoadCommitFileDiff {
+        id: WorkspaceId,
+        hash: String,
+        file: String,
+    },
     GitStageFile {
         id: WorkspaceId,
         file: String,
@@ -224,6 +233,11 @@ pub enum Event {
         id: WorkspaceId,
         file: String,
         diff: String,
+    },
+    CommitFilesLoaded {
+        id: WorkspaceId,
+        hash: String,
+        files: Vec<String>,
     },
     WorkspaceAttentionChanged {
         id: WorkspaceId,

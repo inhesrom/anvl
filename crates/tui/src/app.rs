@@ -228,12 +228,21 @@ impl MouseSelection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     HomeGrid,
-    WsFiles,
     WsLog,
     WsBranches,
     WsDiff,
     WsTerminal,
     WsTerminalTabs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogItem {
+    UncommittedHeader,
+    ChangedFile(usize),
+    Commit(usize),
+    CommitFile(usize, usize),
+    TagDivider,
+    Tag(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,7 +265,7 @@ pub struct TuiApp {
     pub ws_active_tab: usize,
     pub ws_next_shell_tab: u32,
     pub home_selected: usize,
-    pub ws_selected_file: usize,
+    pub ws_uncommitted_expanded: bool,
     pub ws_selected_commit: usize,
     pub ws_selected_local_branch: usize,
     pub ws_selected_remote_branch: usize,
@@ -289,6 +298,8 @@ pub struct TuiApp {
     pub stash_input: Option<String>,
     pub confirm_stash_pull_pop: Option<WorkspaceId>,
     pub terminal_fullscreen: bool,
+    pub ws_expanded_commit: Option<usize>,
+    pub commit_files_cache: HashMap<String, Vec<String>>,
 }
 
 impl Default for TuiApp {
@@ -310,7 +321,7 @@ impl Default for TuiApp {
             ws_active_tab: 0,
             ws_next_shell_tab: 2,
             home_selected: 0,
-            ws_selected_file: 0,
+            ws_uncommitted_expanded: false,
             ws_selected_commit: 0,
             ws_selected_local_branch: 0,
             ws_selected_remote_branch: 0,
@@ -339,6 +350,8 @@ impl Default for TuiApp {
             stash_input: None,
             confirm_stash_pull_pop: None,
             terminal_fullscreen: false,
+            ws_expanded_commit: None,
+            commit_files_cache: HashMap::new(),
         }
     }
 }
@@ -687,7 +700,7 @@ impl TuiApp {
 
     pub fn set_workspace_git(&mut self, id: WorkspaceId, git: GitState) {
         self.workspace_git.insert(id, git);
-        self.clamp_selected_file();
+        self.clamp_log_selection();
         self.clamp_selected_branches();
     }
 
@@ -818,57 +831,140 @@ impl TuiApp {
         lines
     }
 
-    pub fn move_workspace_file_selection(&mut self, delta: isize) {
+    pub fn total_log_items(&self) -> usize {
         let Some(id) = self.active_workspace_id() else {
-            return;
+            return 1; // just the header
         };
         let Some(git) = self.workspace_git.get(&id) else {
-            self.ws_selected_file = 0;
-            return;
+            return 1;
         };
-        if git.changed.is_empty() {
-            self.ws_selected_file = 0;
-            return;
-        }
-        let len = git.changed.len() as isize;
-        let next = (self.ws_selected_file as isize + delta).clamp(0, len - 1);
-        self.ws_selected_file = next as usize;
+        let file_count = if self.ws_uncommitted_expanded && !git.changed.is_empty() {
+            git.changed.len()
+        } else {
+            0
+        };
+        let expanded_commit_files = self.expanded_commit_file_count(git);
+        let tag_count = if git.tags.is_empty() { 0 } else { 1 + git.tags.len() };
+        1 + file_count + git.recent_commits.len() + expanded_commit_files + tag_count
     }
 
-    pub fn selected_changed_file(&self) -> Option<String> {
-        let id = self.active_workspace_id()?;
-        let git = self.workspace_git.get(&id)?;
-        git.changed
-            .get(self.ws_selected_file)
-            .map(|c| c.path.clone())
+    fn expanded_commit_file_count(&self, git: &GitState) -> usize {
+        if let Some(ci) = self.ws_expanded_commit {
+            if let Some(commit) = git.recent_commits.get(ci) {
+                if let Some(files) = self.commit_files_cache.get(&commit.hash) {
+                    return files.len();
+                }
+            }
+        }
+        0
+    }
+
+    pub fn log_item_at(&self, index: usize) -> LogItem {
+        if index == 0 {
+            return LogItem::UncommittedHeader;
+        }
+        let id = match self.active_workspace_id() {
+            Some(id) => id,
+            None => return LogItem::UncommittedHeader,
+        };
+        let git = match self.workspace_git.get(&id) {
+            Some(g) => g,
+            None => return LogItem::UncommittedHeader,
+        };
+        let file_count = if self.ws_uncommitted_expanded && !git.changed.is_empty() {
+            git.changed.len()
+        } else {
+            0
+        };
+        let mut offset = index - 1; // subtract header
+        if offset < file_count {
+            return LogItem::ChangedFile(offset);
+        }
+        offset -= file_count;
+
+        // Commits with optional expanded file lists
+        for i in 0..git.recent_commits.len() {
+            if offset == 0 {
+                return LogItem::Commit(i);
+            }
+            offset -= 1;
+            if self.ws_expanded_commit == Some(i) {
+                if let Some(files) = self.commit_files_cache.get(&git.recent_commits[i].hash) {
+                    if offset < files.len() {
+                        return LogItem::CommitFile(i, offset);
+                    }
+                    offset -= files.len();
+                }
+            }
+        }
+
+        if !git.tags.is_empty() {
+            if offset == 0 {
+                return LogItem::TagDivider;
+            }
+            offset -= 1;
+            if offset < git.tags.len() {
+                return LogItem::Tag(offset);
+            }
+        }
+        LogItem::UncommittedHeader // fallback
+    }
+
+    pub fn log_item_is_file_context(&self) -> bool {
+        matches!(
+            self.log_item_at(self.ws_selected_commit),
+            LogItem::UncommittedHeader | LogItem::ChangedFile(_)
+        )
+    }
+
+    pub fn selected_log_file(&self) -> Option<String> {
+        if let LogItem::ChangedFile(i) = self.log_item_at(self.ws_selected_commit) {
+            let id = self.active_workspace_id()?;
+            let git = self.workspace_git.get(&id)?;
+            git.changed.get(i).map(|c| c.path.clone())
+        } else {
+            None
+        }
     }
 
     pub fn move_workspace_commit_selection(&mut self, delta: isize) {
-        let Some(id) = self.active_workspace_id() else {
-            return;
-        };
-        let Some(git) = self.workspace_git.get(&id) else {
-            self.ws_selected_commit = 0;
-            return;
-        };
-        // Total items = commits + (divider + tags) if tags exist
-        let total = git.recent_commits.len()
-            + if git.tags.is_empty() { 0 } else { 1 + git.tags.len() };
+        let total = self.total_log_items();
         if total == 0 {
             self.ws_selected_commit = 0;
             return;
         }
-        let len = total as isize;
-        let next = (self.ws_selected_commit as isize + delta).clamp(0, len - 1);
-        self.ws_selected_commit = next as usize;
+        let mut next = (self.ws_selected_commit as isize + delta).clamp(0, total as isize - 1) as usize;
+        // Skip tag divider
+        if matches!(self.log_item_at(next), LogItem::TagDivider) {
+            let stepped = (next as isize + delta.signum()).clamp(0, total as isize - 1) as usize;
+            if stepped != next {
+                next = stepped;
+            }
+        }
+        self.ws_selected_commit = next;
     }
 
     pub fn selected_commit_hash(&self) -> Option<String> {
+        let ci = match self.log_item_at(self.ws_selected_commit) {
+            LogItem::Commit(i) => i,
+            LogItem::CommitFile(i, _) => i,
+            _ => return None,
+        };
         let id = self.active_workspace_id()?;
         let git = self.workspace_git.get(&id)?;
-        git.recent_commits
-            .get(self.ws_selected_commit)
-            .map(|c| c.hash.clone())
+        git.recent_commits.get(ci).map(|c| c.hash.clone())
+    }
+
+    pub fn selected_commit_file(&self) -> Option<(String, String)> {
+        if let LogItem::CommitFile(ci, fi) = self.log_item_at(self.ws_selected_commit) {
+            let id = self.active_workspace_id()?;
+            let git = self.workspace_git.get(&id)?;
+            let hash = git.recent_commits.get(ci)?.hash.clone();
+            let file = self.commit_files_cache.get(&hash)?.get(fi)?.clone();
+            Some((hash, file))
+        } else {
+            None
+        }
     }
 
     pub fn is_committing(&self) -> bool {
@@ -884,7 +980,7 @@ impl TuiApp {
     }
 
     pub fn begin_discard(&mut self) {
-        if let Some(file) = self.selected_changed_file() {
+        if let Some(file) = self.selected_log_file() {
             self.confirm_discard_file = Some(file);
         }
     }
@@ -1045,16 +1141,25 @@ impl TuiApp {
         }
     }
 
-    fn clamp_selected_file(&mut self) {
+    fn clamp_log_selection(&mut self) {
         let Some(id) = self.active_workspace_id() else {
             return;
         };
         if let Some(git) = self.workspace_git.get(&id) {
             if git.changed.is_empty() {
-                self.ws_selected_file = 0;
-            } else if self.ws_selected_file >= git.changed.len() {
-                self.ws_selected_file = git.changed.len() - 1;
+                self.ws_uncommitted_expanded = false;
             }
+            if let Some(ci) = self.ws_expanded_commit {
+                if ci >= git.recent_commits.len() {
+                    self.ws_expanded_commit = None;
+                }
+            }
+        }
+        let total = self.total_log_items();
+        if total == 0 {
+            self.ws_selected_commit = 0;
+        } else if self.ws_selected_commit >= total {
+            self.ws_selected_commit = total - 1;
         }
     }
 

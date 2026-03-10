@@ -529,6 +529,24 @@ pub async fn diff_commit(repo: &Path, hash: &str, ssh: Option<&SshTarget>) -> Re
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+pub async fn list_commit_files(repo: &Path, hash: &str, ssh: Option<&SshTarget>) -> Result<Vec<String>> {
+    let out = ssh::build_command(ssh, repo, "git", &["diff-tree", "--no-commit-id", "--name-only", "-r", hash])
+        .output()
+        .await?;
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect())
+}
+
+pub async fn diff_commit_file(repo: &Path, hash: &str, file: &str, ssh: Option<&SshTarget>) -> Result<String> {
+    let out = ssh::build_command(ssh, repo, "git", &["show", hash, "--format=", "--", file])
+        .output()
+        .await?;
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
 pub async fn stage_file(repo: &Path, file: &str, ssh: Option<&SshTarget>) -> Result<()> {
     let out = ssh::build_command(ssh, repo, "git", &["add", "--", file])
         .output()

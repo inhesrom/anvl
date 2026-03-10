@@ -1544,19 +1544,43 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
 
                             match key.code {
                                 KeyCode::Enter => {
-                                    if matches!(app.focus, app::Focus::WsFiles) {
-                                        if let Some(file) = app.selected_changed_file() {
-                                            let _ = backend
-                                                .cmd_tx
-                                                .send(Command::LoadDiff { id, file })
-                                                .await;
-                                        }
-                                    } else if matches!(app.focus, app::Focus::WsLog) {
-                                        if let Some(hash) = app.selected_commit_hash() {
-                                            let _ = backend
-                                                .cmd_tx
-                                                .send(Command::LoadCommitDiff { id, hash })
-                                                .await;
+                                    if matches!(app.focus, app::Focus::WsLog) {
+                                        match app.log_item_at(app.ws_selected_commit) {
+                                            app::LogItem::UncommittedHeader => {
+                                                app.ws_uncommitted_expanded = !app.ws_uncommitted_expanded;
+                                            }
+                                            app::LogItem::ChangedFile(_) => {
+                                                if let Some(file) = app.selected_log_file() {
+                                                    let _ = backend
+                                                        .cmd_tx
+                                                        .send(Command::LoadDiff { id, file })
+                                                        .await;
+                                                }
+                                            }
+                                            app::LogItem::Commit(ci) => {
+                                                if app.ws_expanded_commit == Some(ci) {
+                                                    app.ws_expanded_commit = None;
+                                                } else {
+                                                    app.ws_expanded_commit = Some(ci);
+                                                    if let Some(hash) = app.selected_commit_hash() {
+                                                        if !app.commit_files_cache.contains_key(&hash) {
+                                                            let _ = backend
+                                                                .cmd_tx
+                                                                .send(Command::LoadCommitFiles { id, hash })
+                                                                .await;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            app::LogItem::CommitFile(_, _) => {
+                                                if let Some((hash, file)) = app.selected_commit_file() {
+                                                    let _ = backend
+                                                        .cmd_tx
+                                                        .send(Command::LoadCommitFileDiff { id, hash, file })
+                                                        .await;
+                                                }
+                                            }
+                                            _ => {}
                                         }
                                     }
                                 }
@@ -1574,17 +1598,19 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     let _ = backend.cmd_tx.send(Command::RefreshGit { id }).await;
                                 }
                                 KeyCode::Down | KeyCode::Char('j') => match app.focus {
-                                    app::Focus::WsFiles => {
-                                        app.move_workspace_file_selection(1);
-                                        if let Some(file) = app.selected_changed_file() {
+                                    app::Focus::WsLog => {
+                                        app.move_workspace_commit_selection(1);
+                                        if let Some(file) = app.selected_log_file() {
                                             let _ = backend
                                                 .cmd_tx
                                                 .send(Command::LoadDiff { id, file })
                                                 .await;
+                                        } else if let Some((hash, file)) = app.selected_commit_file() {
+                                            let _ = backend
+                                                .cmd_tx
+                                                .send(Command::LoadCommitFileDiff { id, hash, file })
+                                                .await;
                                         }
-                                    }
-                                    app::Focus::WsLog => {
-                                        app.move_workspace_commit_selection(1);
                                     }
                                     app::Focus::WsBranches => {
                                         app.move_branch_selection(1);
@@ -1595,17 +1621,19 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     _ => {}
                                 },
                                 KeyCode::Up | KeyCode::Char('k') => match app.focus {
-                                    app::Focus::WsFiles => {
-                                        app.move_workspace_file_selection(-1);
-                                        if let Some(file) = app.selected_changed_file() {
+                                    app::Focus::WsLog => {
+                                        app.move_workspace_commit_selection(-1);
+                                        if let Some(file) = app.selected_log_file() {
                                             let _ = backend
                                                 .cmd_tx
                                                 .send(Command::LoadDiff { id, file })
                                                 .await;
+                                        } else if let Some((hash, file)) = app.selected_commit_file() {
+                                            let _ = backend
+                                                .cmd_tx
+                                                .send(Command::LoadCommitFileDiff { id, hash, file })
+                                                .await;
                                         }
-                                    }
-                                    app::Focus::WsLog => {
-                                        app.move_workspace_commit_selection(-1);
                                     }
                                     app::Focus::WsBranches => {
                                         app.move_branch_selection(-1);
@@ -1616,24 +1644,28 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     _ => {}
                                 },
                                 KeyCode::Char(' ')
-                                    if matches!(app.focus, app::Focus::WsFiles) =>
+                                    if matches!(app.focus, app::Focus::WsLog)
+                                        && matches!(app.log_item_at(app.ws_selected_commit), app::LogItem::ChangedFile(_)) =>
                                 {
                                     // Toggle stage/unstage selected file
-                                    if let Some(git) = app.workspace_git.get(&id) {
-                                        if let Some(f) = git.changed.get(app.ws_selected_file) {
-                                            let file = f.path.clone();
-                                            let is_staged = f.index_status != ' ' && f.index_status != '?';
-                                            let cmd = if is_staged {
-                                                Command::GitUnstageFile { id, file }
-                                            } else {
-                                                Command::GitStageFile { id, file }
-                                            };
-                                            let _ = backend.cmd_tx.send(cmd).await;
+                                    if let app::LogItem::ChangedFile(fi) = app.log_item_at(app.ws_selected_commit) {
+                                        if let Some(git) = app.workspace_git.get(&id) {
+                                            if let Some(f) = git.changed.get(fi) {
+                                                let file = f.path.clone();
+                                                let is_staged = f.index_status != ' ' && f.index_status != '?';
+                                                let cmd = if is_staged {
+                                                    Command::GitUnstageFile { id, file }
+                                                } else {
+                                                    Command::GitStageFile { id, file }
+                                                };
+                                                let _ = backend.cmd_tx.send(cmd).await;
+                                            }
                                         }
                                     }
                                 }
                                 KeyCode::Char('+')
-                                    if matches!(app.focus, app::Focus::WsFiles) =>
+                                    if matches!(app.focus, app::Focus::WsLog)
+                                        && app.log_item_is_file_context() =>
                                 {
                                     let _ = backend
                                         .cmd_tx
@@ -1641,7 +1673,8 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                         .await;
                                 }
                                 KeyCode::Char('-')
-                                    if matches!(app.focus, app::Focus::WsFiles) =>
+                                    if matches!(app.focus, app::Focus::WsLog)
+                                        && app.log_item_is_file_context() =>
                                 {
                                     let _ = backend
                                         .cmd_tx
@@ -1649,17 +1682,20 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                         .await;
                                 }
                                 KeyCode::Char('c')
-                                    if matches!(app.focus, app::Focus::WsFiles) =>
+                                    if matches!(app.focus, app::Focus::WsLog)
+                                        && app.log_item_is_file_context() =>
                                 {
                                     app.commit_input = Some(String::new());
                                 }
                                 KeyCode::Char('d')
-                                    if matches!(app.focus, app::Focus::WsFiles) =>
+                                    if matches!(app.focus, app::Focus::WsLog)
+                                        && matches!(app.log_item_at(app.ws_selected_commit), app::LogItem::ChangedFile(_)) =>
                                 {
                                     app.begin_discard();
                                 }
                                 KeyCode::Char('s')
-                                    if matches!(app.focus, app::Focus::WsFiles) =>
+                                    if matches!(app.focus, app::Focus::WsLog)
+                                        && app.log_item_is_file_context() =>
                                 {
                                     app.stash_input = Some(String::new());
                                 }
@@ -1855,6 +1891,9 @@ fn apply_event(app: &mut TuiApp, evt: CoreEvent) {
         CoreEvent::WorkspaceDiffUpdated { id, file, diff } => {
             app.set_workspace_diff(id, file, diff)
         }
+        CoreEvent::CommitFilesLoaded { id: _, hash, files } => {
+            app.commit_files_cache.insert(hash, files);
+        }
         CoreEvent::TerminalOutput {
             id,
             kind: _,
@@ -1917,8 +1956,7 @@ fn apply_event(app: &mut TuiApp, evt: CoreEvent) {
 fn cycle_workspace_focus(focus: app::Focus) -> app::Focus {
     match focus {
         app::Focus::WsTerminalTabs => app::Focus::WsTerminal,
-        app::Focus::WsTerminal => app::Focus::WsFiles,
-        app::Focus::WsFiles => app::Focus::WsLog,
+        app::Focus::WsTerminal => app::Focus::WsLog,
         app::Focus::WsLog => app::Focus::WsBranches,
         app::Focus::WsBranches => app::Focus::WsDiff,
         app::Focus::WsDiff => app::Focus::WsTerminalTabs,
@@ -1930,8 +1968,7 @@ fn cycle_workspace_focus_reverse(focus: app::Focus) -> app::Focus {
     match focus {
         app::Focus::WsTerminalTabs => app::Focus::WsDiff,
         app::Focus::WsTerminal => app::Focus::WsTerminalTabs,
-        app::Focus::WsFiles => app::Focus::WsTerminal,
-        app::Focus::WsLog => app::Focus::WsFiles,
+        app::Focus::WsLog => app::Focus::WsTerminal,
         app::Focus::WsBranches => app::Focus::WsLog,
         app::Focus::WsDiff => app::Focus::WsBranches,
         _ => app::Focus::WsTerminalTabs,
@@ -2138,16 +2175,14 @@ async fn handle_mouse(
                         ui::screens::workspace::WorkspaceHit::TerminalPane => {
                             app.focus = app::Focus::WsTerminal;
                         }
-                        ui::screens::workspace::WorkspaceHit::FilesList(idx) => {
-                            app.focus = app::Focus::WsFiles;
-                            app.ws_selected_file = idx;
-                            if let Some(file) = app.selected_changed_file() {
-                                let _ = cmd_tx.send(Command::LoadDiff { id, file }).await;
-                            }
-                        }
                         ui::screens::workspace::WorkspaceHit::LogList(idx) => {
                             app.focus = app::Focus::WsLog;
                             app.ws_selected_commit = idx;
+                            if let Some(file) = app.selected_log_file() {
+                                let _ = cmd_tx.send(Command::LoadDiff { id, file }).await;
+                            } else if let Some((hash, file)) = app.selected_commit_file() {
+                                let _ = cmd_tx.send(Command::LoadCommitFileDiff { id, hash, file }).await;
+                            }
                         }
                         ui::screens::workspace::WorkspaceHit::BranchesPane(idx) => {
                             app.focus = app::Focus::WsBranches;
