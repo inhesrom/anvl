@@ -178,6 +178,9 @@ pub enum Command {
         id: WorkspaceId,
         message: Option<String>,
     },
+    GitStashPullPop {
+        id: WorkspaceId,
+    },
     StartTerminal {
         id: WorkspaceId,
         kind: TerminalKind,

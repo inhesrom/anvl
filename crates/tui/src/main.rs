@@ -995,6 +995,7 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                         && !app.is_committing()
                         && !app.is_creating_branch()
                         && !app.is_confirming_discard()
+                        && !app.is_confirming_stash_pull_pop()
                         && !app.is_stashing()
                         && !app.is_settings_open()
                         && !matches!(app.focus, app::Focus::WsTerminal)
@@ -1426,6 +1427,25 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     }
                                     KeyCode::Char('n') | KeyCode::Esc => {
                                         app.cancel_discard();
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+
+                            if app.is_confirming_stash_pull_pop() {
+                                match key.code {
+                                    KeyCode::Char('y') | KeyCode::Enter => {
+                                        if let Some(ws_id) = app.take_stash_pull_pop() {
+                                            app.begin_git_op(ws_id);
+                                            let _ = backend
+                                                .cmd_tx
+                                                .send(Command::GitStashPullPop { id: ws_id })
+                                                .await;
+                                        }
+                                    }
+                                    KeyCode::Char('n') | KeyCode::Esc => {
+                                        app.cancel_stash_pull_pop();
                                     }
                                     _ => {}
                                 }
@@ -1864,15 +1884,19 @@ fn apply_event(app: &mut TuiApp, evt: CoreEvent) {
         }
         CoreEvent::GitActionResult {
             id,
-            action: _,
-            success: _,
-            message,
+            ref action,
+            success,
+            ref message,
         } => {
-            if app.finish_git_op(id) {
-                app.git_action_message = Some((message, std::time::Instant::now()));
+            if action == "pull_dirty_tree" && !success {
+                // Cancel the spinner and show confirmation modal instead of toast
+                let _ = app.finish_git_op(id);
+                app.begin_stash_pull_pop(id);
+            } else if app.finish_git_op(id) {
+                app.git_action_message = Some((message.clone(), std::time::Instant::now()));
             } else {
                 // Spinner minimum duration not met; defer the toast.
-                app.deferred_git_result = Some((id, message));
+                app.deferred_git_result = Some((id, message.clone()));
             }
         }
         CoreEvent::WorkspaceAttentionChanged { id, level } => {

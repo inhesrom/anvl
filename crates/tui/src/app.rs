@@ -287,6 +287,7 @@ pub struct TuiApp {
     pub ssh_history_picker: Option<SshHistoryPicker>,
     pub confirm_discard_file: Option<String>,
     pub stash_input: Option<String>,
+    pub confirm_stash_pull_pop: Option<WorkspaceId>,
 }
 
 impl Default for TuiApp {
@@ -335,6 +336,7 @@ impl Default for TuiApp {
             ssh_history_picker: None,
             confirm_discard_file: None,
             stash_input: None,
+            confirm_stash_pull_pop: None,
         }
     }
 }
@@ -886,6 +888,22 @@ impl TuiApp {
 
     pub fn take_discard_file(&mut self) -> Option<String> {
         self.confirm_discard_file.take()
+    }
+
+    pub fn is_confirming_stash_pull_pop(&self) -> bool {
+        self.confirm_stash_pull_pop.is_some()
+    }
+
+    pub fn begin_stash_pull_pop(&mut self, id: WorkspaceId) {
+        self.confirm_stash_pull_pop = Some(id);
+    }
+
+    pub fn cancel_stash_pull_pop(&mut self) {
+        self.confirm_stash_pull_pop = None;
+    }
+
+    pub fn take_stash_pull_pop(&mut self) -> Option<WorkspaceId> {
+        self.confirm_stash_pull_pop.take()
     }
 
     pub fn is_stashing(&self) -> bool {

@@ -25,7 +25,7 @@ struct GitRefreshResult {
 use workspace::attention::AttentionDetector;
 use workspace::git::{
     checkout_branch, checkout_remote_branch, commit, create_branch, diff_commit, diff_file,
-    discard_file, git_fetch, git_pull, git_push, git_stash, refresh_git, stage_all, stage_file,
+    discard_file, git_fetch, git_pull, git_push, git_stash, git_stash_pull_pop, refresh_git, stage_all, stage_file,
     unstage_all, unstage_file,
 };
 use workspace::ssh;
@@ -342,12 +342,19 @@ pub fn spawn_core() -> CoreHandle {
                     if let Some(ws) = state.workspaces.get(&id) {
                         let path = ws.path.clone();
                         let ssh = ws.ssh.clone();
-                        let (success, msg) = match git_pull(&path, ssh.as_ref()).await {
-                            Ok(()) => (true, "Pulled".to_string()),
-                            Err(e) => (false, e.to_string()),
+                        let (success, action, msg) = match git_pull(&path, ssh.as_ref()).await {
+                            Ok(()) => (true, "pull".to_string(), "Pulled".to_string()),
+                            Err(e) => {
+                                let err_msg = e.to_string();
+                                if err_msg.starts_with("DIRTY_TREE:") {
+                                    (false, "pull_dirty_tree".to_string(), err_msg)
+                                } else {
+                                    (false, "pull".to_string(), err_msg)
+                                }
+                            }
                         };
                         let _ = evt_tx_task.send(Event::GitActionResult {
-                            id, action: "pull".to_string(), success, message: msg,
+                            id, action, success, message: msg,
                         });
                         if let Ok(git) = refresh_git(&path, ssh.as_ref()).await {
                             if let Some(ws) = state.workspaces.get_mut(&id) { ws.git = git.clone(); }
@@ -403,6 +410,23 @@ pub fn spawn_core() -> CoreHandle {
                         };
                         let _ = evt_tx_task.send(Event::GitActionResult {
                             id, action: "stash".to_string(), success, message: msg,
+                        });
+                        if let Ok(git) = refresh_git(&path, ssh.as_ref()).await {
+                            if let Some(ws) = state.workspaces.get_mut(&id) { ws.git = git.clone(); }
+                            let _ = evt_tx_task.send(Event::WorkspaceGitUpdated { id, git });
+                        }
+                    }
+                }
+                Command::GitStashPullPop { id } => {
+                    if let Some(ws) = state.workspaces.get(&id) {
+                        let path = ws.path.clone();
+                        let ssh = ws.ssh.clone();
+                        let (success, msg) = match git_stash_pull_pop(&path, ssh.as_ref()).await {
+                            Ok(()) => (true, "Pulled (stash-pull-pop)".to_string()),
+                            Err(e) => (false, e.to_string()),
+                        };
+                        let _ = evt_tx_task.send(Event::GitActionResult {
+                            id, action: "pull".to_string(), success, message: msg,
                         });
                         if let Ok(git) = refresh_git(&path, ssh.as_ref()).await {
                             if let Some(ws) = state.workspaces.get_mut(&id) { ws.git = git.clone(); }

@@ -645,13 +645,18 @@ pub async fn git_pull(repo: &Path, ssh: Option<&SshTarget>) -> Result<()> {
 
     let stderr = String::from_utf8_lossy(&out.stderr);
     let needs_stash = stderr.contains("Please commit your changes or stash them")
-        || stderr.contains("Your local changes to the following files would be overwritten");
+        || stderr.contains("Your local changes to the following files would be overwritten")
+        || stderr.contains("cannot pull with rebase")
+        || stderr.contains("You have unstaged changes");
 
-    if !needs_stash {
-        anyhow::bail!("git pull failed: {}", stderr);
+    if needs_stash {
+        anyhow::bail!("DIRTY_TREE: {}", stderr);
     }
 
-    // Auto stash-pull-pop
+    anyhow::bail!("git pull failed: {}", stderr);
+}
+
+pub async fn git_stash_pull_pop(repo: &Path, ssh: Option<&SshTarget>) -> Result<()> {
     let stash_out = ssh::build_command(ssh, repo, "git", &["stash"])
         .output()
         .await?;
