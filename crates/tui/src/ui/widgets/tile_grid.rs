@@ -431,6 +431,7 @@ mod tests {
             shell_running: false,
             last_activity_unix_ms: 0,
             ssh_host: None,
+            agent_hook_status: protocol::AgentHookStatus::Unknown,
         }
     }
 

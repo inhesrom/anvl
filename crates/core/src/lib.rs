@@ -52,9 +52,18 @@ pub fn spawn_core() -> CoreHandle {
         let mut git_tick = tokio::time::interval(Duration::from_secs(2));
         let mut git_refresh_in_flight = false;
         let (git_result_tx, mut git_result_rx) = mpsc::channel::<GitRefreshResult>(64);
+        // Fast tick for polling agent hook status files.
+        let mut agent_status_tick = tokio::time::interval(Duration::from_millis(500));
+        agent_status_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
+                _ = agent_status_tick.tick() => {
+                    // Re-read agent hook status files and emit updated workspace list.
+                    let _ = evt_tx_task.send(Event::WorkspaceList {
+                        items: workspace_summaries(&state),
+                    });
+                }
                 maybe_cmd = cmd_rx.recv() => {
                     let Some(cmd) = maybe_cmd else { break; };
                     match cmd {
@@ -526,7 +535,10 @@ pub fn spawn_core() -> CoreHandle {
                                 }
                             }
 
-                            match start_terminal(cwd, command, ssh_target.as_ref()).await {
+                            let env = vec![
+                                ("ANVL_WORKSPACE_ID".to_string(), id.to_string()),
+                            ];
+                            match start_terminal(cwd, command, ssh_target.as_ref(), env).await {
                                 Ok((session, mut out_rx)) => {
                                     match kind {
                                         protocol::TerminalKind::Agent => {
@@ -757,6 +769,23 @@ pub fn spawn_core() -> CoreHandle {
     CoreHandle { cmd_tx, evt_tx }
 }
 
+/// Directory where Claude Code hooks write agent status files.
+pub const AGENT_STATUS_DIR: &str = "/tmp/anvl-agent-status";
+
+/// Read the agent hook status file for a workspace by its ID.
+fn read_agent_hook_status(workspace_id: protocol::WorkspaceId) -> protocol::AgentHookStatus {
+    let path = std::path::PathBuf::from(AGENT_STATUS_DIR).join(workspace_id.to_string());
+    match std::fs::read_to_string(path) {
+        Ok(content) => match content.trim() {
+            "working" => protocol::AgentHookStatus::Working,
+            "done" => protocol::AgentHookStatus::Done,
+            "permission" => protocol::AgentHookStatus::NeedsPermission,
+            _ => protocol::AgentHookStatus::Unknown,
+        },
+        Err(_) => protocol::AgentHookStatus::Unknown,
+    }
+}
+
 fn workspace_summaries(state: &AppState) -> Vec<WorkspaceSummary> {
     state
         .ordered_ids
@@ -764,6 +793,7 @@ fn workspace_summaries(state: &AppState) -> Vec<WorkspaceSummary> {
         .filter_map(|id| state.workspaces.get(id))
         .map(|ws| {
             let ssh_host = ws.ssh.as_ref().map(|t| ssh::ssh_destination(t));
+            let agent_hook_status = read_agent_hook_status(ws.id);
             WorkspaceSummary {
                 id: ws.id,
                 name: ws.name.clone(),
@@ -777,6 +807,7 @@ fn workspace_summaries(state: &AppState) -> Vec<WorkspaceSummary> {
                 shell_running: !ws.terminals.shells.is_empty(),
                 last_activity_unix_ms: unix_ms_now(),
                 ssh_host,
+                agent_hook_status,
             }
         })
         .collect::<Vec<_>>()
@@ -1011,5 +1042,68 @@ mod tests {
         let agent_cmd = default_terminal_cmd(protocol::TerminalKind::Agent);
         let shell_cmd = default_terminal_cmd(protocol::TerminalKind::Shell);
         assert_eq!(agent_cmd, shell_cmd);
+    }
+
+    // ── read_agent_hook_status tests ────────────────────────────────────
+
+    #[test]
+    fn agent_hook_status_missing_file() {
+        let id = uuid::Uuid::new_v4();
+        assert_eq!(read_agent_hook_status(id), protocol::AgentHookStatus::Unknown);
+    }
+
+    #[test]
+    fn agent_hook_status_done() {
+        let id = uuid::Uuid::new_v4();
+        let dir = std::path::PathBuf::from(AGENT_STATUS_DIR);
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(id.to_string());
+        std::fs::write(&path, "done").unwrap();
+        assert_eq!(read_agent_hook_status(id), protocol::AgentHookStatus::Done);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn agent_hook_status_permission() {
+        let id = uuid::Uuid::new_v4();
+        let dir = std::path::PathBuf::from(AGENT_STATUS_DIR);
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(id.to_string());
+        std::fs::write(&path, "permission").unwrap();
+        assert_eq!(read_agent_hook_status(id), protocol::AgentHookStatus::NeedsPermission);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn agent_hook_status_working() {
+        let id = uuid::Uuid::new_v4();
+        let dir = std::path::PathBuf::from(AGENT_STATUS_DIR);
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(id.to_string());
+        std::fs::write(&path, "working").unwrap();
+        assert_eq!(read_agent_hook_status(id), protocol::AgentHookStatus::Working);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn agent_hook_status_invalid_content() {
+        let id = uuid::Uuid::new_v4();
+        let dir = std::path::PathBuf::from(AGENT_STATUS_DIR);
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(id.to_string());
+        std::fs::write(&path, "garbage").unwrap();
+        assert_eq!(read_agent_hook_status(id), protocol::AgentHookStatus::Unknown);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn agent_hook_status_trims_whitespace() {
+        let id = uuid::Uuid::new_v4();
+        let dir = std::path::PathBuf::from(AGENT_STATUS_DIR);
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(id.to_string());
+        std::fs::write(&path, "done\n").unwrap();
+        assert_eq!(read_agent_hook_status(id), protocol::AgentHookStatus::Done);
+        let _ = std::fs::remove_file(&path);
     }
 }

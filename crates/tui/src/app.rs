@@ -384,6 +384,25 @@ impl TuiApp {
         self.route = Route::Workspace { id };
         self.focus = Focus::WsTerminal;
         self.load_tabs_for_workspace(id);
+        // Clear agent status when entering a workspace — the user is now looking at it.
+        let status_path = std::path::PathBuf::from(AGENT_STATUS_DIR).join(id.to_string());
+        let _ = std::fs::remove_file(status_path);
+    }
+
+    /// Cycle to the next (+1) or previous (-1) workspace. Returns the new workspace id.
+    pub fn cycle_workspace(&mut self, delta: isize) -> Option<WorkspaceId> {
+        if self.workspaces.is_empty() {
+            return None;
+        }
+        let current_id = self.active_workspace_id()?;
+        let cur_idx = self.workspaces.iter().position(|w| w.id == current_id)?;
+        let len = self.workspaces.len() as isize;
+        let new_idx = ((cur_idx as isize + delta).rem_euclid(len)) as usize;
+        let new_id = self.workspaces[new_idx].id;
+        if new_id != current_id {
+            self.open_workspace(new_id);
+        }
+        Some(new_id)
     }
 
     pub fn go_home(&mut self) {
@@ -1059,16 +1078,24 @@ impl TuiApp {
         self.settings_open = false;
     }
 
-    pub fn toggle_selected_setting(&mut self) {
+    pub fn toggle_selected_setting(&mut self) -> bool {
         match self.settings_selected {
             0 => self.settings.attention_notifications = !self.settings.attention_notifications,
+            1 => {
+                // Install or reinstall Claude Code hooks (always replaces old hooks)
+                if install_claude_hooks().is_ok() {
+                    self.settings.claude_hooks_installed = true;
+                }
+            }
             _ => {}
         }
         let _ = save_settings(&self.settings);
+        // Return whether hooks were just installed (for UI feedback)
+        self.settings_selected == 1 && self.settings.claude_hooks_installed
     }
 
     pub fn settings_count(&self) -> usize {
-        1
+        2
     }
 
     pub fn effective_attention(&self, raw: AttentionLevel) -> AttentionLevel {
@@ -1498,6 +1525,8 @@ fn tabs_persist_path() -> Option<PathBuf> {
 pub struct Settings {
     #[serde(default = "default_true")]
     pub attention_notifications: bool,
+    #[serde(default)]
+    pub claude_hooks_installed: bool,
 }
 
 fn default_true() -> bool {
@@ -1508,6 +1537,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             attention_notifications: true,
+            claude_hooks_installed: false,
         }
     }
 }
@@ -1530,7 +1560,14 @@ fn load_settings() -> Settings {
     let Ok(raw) = fs::read_to_string(path) else {
         return Settings::default();
     };
-    serde_json::from_str(&raw).unwrap_or_default()
+    let mut settings: Settings = serde_json::from_str(&raw).unwrap_or_default();
+    // Sync with actual state of Claude Code hooks on disk.
+    let actually_configured = claude_hooks_configured();
+    if settings.claude_hooks_installed != actually_configured {
+        settings.claude_hooks_installed = actually_configured;
+        let _ = save_settings(&settings);
+    }
+    settings
 }
 
 fn save_settings(settings: &Settings) -> anyhow::Result<()> {
@@ -1543,6 +1580,112 @@ fn save_settings(settings: &Settings) -> anyhow::Result<()> {
     let raw = serde_json::to_string_pretty(settings)?;
     fs::write(path, raw)?;
     Ok(())
+}
+
+/// Directory where Claude Code hooks write agent status files.
+pub const AGENT_STATUS_DIR: &str = "/tmp/anvl-agent-status";
+
+/// Check if Claude Code hooks for anvl agent status are already configured.
+pub fn claude_hooks_configured() -> bool {
+    let Some(path) = claude_settings_path() else {
+        return false;
+    };
+    let Ok(raw) = fs::read_to_string(path) else {
+        return false;
+    };
+    // Check if our hook marker is present in the settings
+    raw.contains("ANVL_WORKSPACE_ID") && raw.contains("anvl-agent-status")
+}
+
+/// Install Claude Code hooks for agent status reporting into ~/.claude/settings.json.
+pub fn install_claude_hooks() -> anyhow::Result<()> {
+    let Some(path) = claude_settings_path() else {
+        return Ok(());
+    };
+
+    // Ensure the status directory exists
+    let _ = fs::create_dir_all(AGENT_STATUS_DIR);
+
+    // The hook command: write status to a file keyed by workspace ID.
+    // $ANVL_WORKSPACE_ID is set by anvl when spawning the terminal.
+    let write_status = |status: &str| -> String {
+        format!(
+            "[ -n \"$ANVL_WORKSPACE_ID\" ] && mkdir -p {dir} && printf '{status}' > \"{dir}/$ANVL_WORKSPACE_ID\"",
+            dir = AGENT_STATUS_DIR,
+            status = status,
+        )
+    };
+
+    let hooks_json = serde_json::json!({
+        "Stop": [
+            {
+                "hooks": [{
+                    "type": "command",
+                    "command": write_status("done")
+                }]
+            }
+        ],
+        "Notification": [
+            {
+                "matcher": "permission_prompt",
+                "hooks": [{
+                    "type": "command",
+                    "command": write_status("permission")
+                }]
+            },
+            {
+                "matcher": "idle_prompt",
+                "hooks": [{
+                    "type": "command",
+                    "command": write_status("done")
+                }]
+            }
+        ]
+    });
+
+    // Read existing settings or start fresh
+    let mut settings: serde_json::Value = if path.exists() {
+        let raw = fs::read_to_string(&path)?;
+        serde_json::from_str(&raw).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    // Merge our hooks into existing hooks (don't overwrite user's other hooks)
+    let existing_hooks = settings
+        .get("hooks")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+
+    let mut merged = existing_hooks.as_object().cloned().unwrap_or_default();
+    for (event, hook_array) in hooks_json.as_object().unwrap() {
+        let existing_arr = merged
+            .entry(event.clone())
+            .or_insert(serde_json::json!([]))
+            .as_array_mut();
+        if let Some(arr) = existing_arr {
+            // Remove any old anvl hooks (path-based or outdated)
+            arr.retain(|h| !h.to_string().contains("anvl-agent-status"));
+            // Add our new hooks
+            if let Some(new_items) = hook_array.as_array() {
+                arr.extend(new_items.iter().cloned());
+            }
+        }
+    }
+
+    settings["hooks"] = serde_json::Value::Object(merged);
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let raw = serde_json::to_string_pretty(&settings)?;
+    fs::write(path, raw)?;
+    Ok(())
+}
+
+fn claude_settings_path() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    Some(PathBuf::from(home).join(".claude").join("settings.json"))
 }
 
 fn ssh_history_path() -> Option<PathBuf> {
@@ -1581,7 +1724,7 @@ fn save_ssh_history(history: &[SshHistoryEntry]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use protocol::{AttentionLevel, GitState, WorkspaceSummary, CommitInfo, ChangedFile, BranchInfo, RemoteBranchInfo};
+    use protocol::{AgentHookStatus, AttentionLevel, GitState, WorkspaceSummary, CommitInfo, ChangedFile, BranchInfo, RemoteBranchInfo};
     use uuid::Uuid;
 
     fn make_ws(name: &str) -> WorkspaceSummary {
@@ -1598,6 +1741,7 @@ mod tests {
             shell_running: false,
             last_activity_unix_ms: 0,
             ssh_host: None,
+            agent_hook_status: AgentHookStatus::Unknown,
         }
     }
 
@@ -2497,5 +2641,81 @@ mod tests {
     fn take_add_workspace_request_no_browser() {
         let mut app = TuiApp::default();
         assert!(app.take_add_workspace_request().is_none());
+    }
+
+    // ── cycle_workspace tests ───────────────────────────────────────────
+
+    #[test]
+    fn cycle_workspace_forward() {
+        let mut app = app_with_workspaces(3);
+        let ids: Vec<_> = app.workspaces.iter().map(|w| w.id).collect();
+        app.open_workspace(ids[0]);
+        let next = app.cycle_workspace(1);
+        assert_eq!(next, Some(ids[1]));
+        assert_eq!(app.active_workspace_id(), Some(ids[1]));
+    }
+
+    #[test]
+    fn cycle_workspace_backward() {
+        let mut app = app_with_workspaces(3);
+        let ids: Vec<_> = app.workspaces.iter().map(|w| w.id).collect();
+        app.open_workspace(ids[1]);
+        let prev = app.cycle_workspace(-1);
+        assert_eq!(prev, Some(ids[0]));
+    }
+
+    #[test]
+    fn cycle_workspace_wraps_forward() {
+        let mut app = app_with_workspaces(3);
+        let ids: Vec<_> = app.workspaces.iter().map(|w| w.id).collect();
+        app.open_workspace(ids[2]);
+        let wrapped = app.cycle_workspace(1);
+        assert_eq!(wrapped, Some(ids[0]));
+    }
+
+    #[test]
+    fn cycle_workspace_wraps_backward() {
+        let mut app = app_with_workspaces(3);
+        let ids: Vec<_> = app.workspaces.iter().map(|w| w.id).collect();
+        app.open_workspace(ids[0]);
+        let wrapped = app.cycle_workspace(-1);
+        assert_eq!(wrapped, Some(ids[2]));
+    }
+
+    #[test]
+    fn cycle_workspace_single_workspace() {
+        let mut app = app_with_workspaces(1);
+        let id = app.workspaces[0].id;
+        app.open_workspace(id);
+        let same = app.cycle_workspace(1);
+        assert_eq!(same, Some(id));
+    }
+
+    #[test]
+    fn cycle_workspace_empty() {
+        let mut app = TuiApp::default();
+        assert_eq!(app.cycle_workspace(1), None);
+    }
+
+    #[test]
+    fn cycle_workspace_not_in_workspace() {
+        let mut app = app_with_workspaces(2);
+        app.route = Route::Home;
+        assert_eq!(app.cycle_workspace(1), None);
+    }
+
+    // ── open_workspace clears status file ───────────────────────────────
+
+    #[test]
+    fn open_workspace_clears_agent_status_file() {
+        let mut app = app_with_workspaces(1);
+        let id = app.workspaces[0].id;
+        let dir = std::path::PathBuf::from(AGENT_STATUS_DIR);
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join(id.to_string());
+        std::fs::write(&path, "done").unwrap();
+        assert!(path.exists());
+        app.open_workspace(id);
+        assert!(!path.exists());
     }
 }

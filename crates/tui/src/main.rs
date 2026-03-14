@@ -1168,7 +1168,7 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                             app.settings_selected.saturating_sub(1);
                                     }
                                     KeyCode::Enter | KeyCode::Char(' ') => {
-                                        app.toggle_selected_setting()
+                                        app.toggle_selected_setting();
                                     }
                                     _ => {}
                                 }
@@ -1662,6 +1662,31 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                             // Shift+F toggles terminal fullscreen from any workspace pane.
                             if key.code == KeyCode::Char('F') {
                                 app.toggle_terminal_fullscreen();
+                                continue;
+                            }
+
+                            // Shift+H / Shift+L cycle between workspaces.
+                            if key.code == KeyCode::Char('H')
+                                || key.code == KeyCode::Char('L')
+                            {
+                                let delta: isize =
+                                    if key.code == KeyCode::Char('H') { -1 } else { 1 };
+                                if let Some(target_id) = app.cycle_workspace(delta) {
+                                    start_workspace_tab_terminals(
+                                        &backend.cmd_tx,
+                                        target_id,
+                                        &app.ws_tabs,
+                                    )
+                                    .await;
+                                    let _ = backend
+                                        .cmd_tx
+                                        .send(Command::RefreshGit { id: target_id })
+                                        .await;
+                                    let _ = backend
+                                        .cmd_tx
+                                        .send(Command::ClearAttention { id: target_id })
+                                        .await;
+                                }
                                 continue;
                             }
 
@@ -2366,6 +2391,26 @@ async fn handle_mouse(
                 {
                     match hit {
                         ui::screens::workspace::WorkspaceHit::Header => {}
+                        ui::screens::workspace::WorkspaceHit::WorkspaceTab(idx) => {
+                            if let Some(ws) = app.workspaces.get(idx) {
+                                let target_id = ws.id;
+                                if target_id != id {
+                                    app.open_workspace(target_id);
+                                    start_workspace_tab_terminals(
+                                        cmd_tx,
+                                        target_id,
+                                        &app.ws_tabs,
+                                    )
+                                    .await;
+                                    let _ = cmd_tx
+                                        .send(Command::RefreshGit { id: target_id })
+                                        .await;
+                                    let _ = cmd_tx
+                                        .send(Command::ClearAttention { id: target_id })
+                                        .await;
+                                }
+                            }
+                        }
                         ui::screens::workspace::WorkspaceHit::TerminalTab(idx) => {
                             app.focus = app::Focus::WsTerminalTabs;
                             app.set_active_tab_index(idx);

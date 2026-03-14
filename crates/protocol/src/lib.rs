@@ -30,6 +30,20 @@ pub enum TerminalKind {
     Shell,
 }
 
+/// Agent status reported via Claude Code hooks (file-based signaling).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AgentHookStatus {
+    /// No status file found (hooks not configured or agent never started).
+    #[default]
+    Unknown,
+    /// Agent is actively working (UserPromptSubmit hook fired).
+    Working,
+    /// Agent finished its response (Stop hook fired).
+    Done,
+    /// Agent needs permission approval (Notification/permission_prompt hook fired).
+    NeedsPermission,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceSummary {
     pub id: WorkspaceId,
@@ -45,6 +59,8 @@ pub struct WorkspaceSummary {
     pub last_activity_unix_ms: u64,
     #[serde(default)]
     pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub agent_hook_status: AgentHookStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -327,7 +343,33 @@ mod tests {
             shell_running: false,
             last_activity_unix_ms: 12345,
             ssh_host: Some("remote".into()),
+            agent_hook_status: AgentHookStatus::Done,
         });
+    }
+
+    #[test]
+    fn agent_hook_status_round_trip() {
+        for status in [
+            AgentHookStatus::Unknown,
+            AgentHookStatus::Working,
+            AgentHookStatus::Done,
+            AgentHookStatus::NeedsPermission,
+        ] {
+            round_trip(&status);
+        }
+    }
+
+    #[test]
+    fn agent_hook_status_default_is_unknown() {
+        assert_eq!(AgentHookStatus::default(), AgentHookStatus::Unknown);
+    }
+
+    #[test]
+    fn workspace_summary_default_agent_hook_status() {
+        // Verify serde(default) works: missing field deserializes as Unknown
+        let json = r#"{"id":"00000000-0000-0000-0000-000000000000","name":"t","path":"/t","branch":null,"ahead":null,"behind":null,"dirty_files":0,"attention":"None","agent_running":false,"shell_running":false,"last_activity_unix_ms":0}"#;
+        let ws: WorkspaceSummary = serde_json::from_str(json).unwrap();
+        assert_eq!(ws.agent_hook_status, AgentHookStatus::Unknown);
     }
 
     #[test]

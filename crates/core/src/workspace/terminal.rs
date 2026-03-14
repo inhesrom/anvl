@@ -64,6 +64,7 @@ pub async fn start_terminal(
     cwd: PathBuf,
     cmd: Vec<String>,
     ssh_target: Option<&SshTarget>,
+    env: Vec<(String, String)>,
 ) -> Result<(TerminalSession, mpsc::Receiver<TerminalOutput>)> {
     let effective_cmd = if let Some(target) = ssh_target {
         if cmd.is_empty() || is_default_shell_cmd(&cmd) {
@@ -90,6 +91,9 @@ pub async fn start_terminal(
     let mut builder = CommandBuilder::new(program);
     for arg in effective_cmd.iter().skip(1) {
         builder.arg(arg);
+    }
+    for (k, v) in &env {
+        builder.env(k, v);
     }
     if ssh_target.is_none() {
         builder.cwd(cwd);

@@ -356,16 +356,34 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
     }
 
     if app.is_settings_open() {
-        let modal = centered_rect(area, 50, 8);
+        let modal = centered_rect(area, 55, 10);
         frame.render_widget(Clear, modal);
 
-        let cursor = if app.settings_selected == 0 { "> " } else { "  " };
-        let toggle = render_toggle(app.settings.attention_notifications);
-        let row = Line::from(vec![
-            Span::styled(cursor, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        let cursor0 = if app.settings_selected == 0 { "> " } else { "  " };
+        let toggle0 = render_toggle(app.settings.attention_notifications);
+        let row0 = Line::from(vec![
+            Span::styled(cursor0, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             Span::raw("Attention notifications   "),
-            toggle,
+            toggle0,
         ]);
+
+        let cursor1 = if app.settings_selected == 1 { "> " } else { "  " };
+        let hooks_label = if app.settings.claude_hooks_installed {
+            "Installed (Space to reinstall)"
+        } else {
+            "Not installed (Space to install)"
+        };
+        let hooks_style = if app.settings.claude_hooks_installed {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let row1 = Line::from(vec![
+            Span::styled(cursor1, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw("Claude Code hooks  "),
+            Span::styled(hooks_label, hooks_style),
+        ]);
+
         let hint = Line::from(vec![
             Span::styled("j/k", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled(" navigate  ", Style::default().fg(Color::DarkGray)),
@@ -374,7 +392,7 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
             Span::styled("Esc", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled(" close", Style::default().fg(Color::DarkGray)),
         ]);
-        let body = vec![Line::from(""), row, Line::from(""), Line::from(""), hint];
+        let body = vec![Line::from(""), row0, row1, Line::from(""), hint];
 
         frame.render_widget(
             Paragraph::new(body).block(
@@ -471,6 +489,7 @@ mod tests {
             shell_running: false,
             last_activity_unix_ms: 0,
             ssh_host: None,
+            agent_hook_status: protocol::AgentHookStatus::Unknown,
         }
     }
 

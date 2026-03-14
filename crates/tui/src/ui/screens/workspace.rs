@@ -9,11 +9,12 @@ use ratatui::{
 use crate::app::TuiApp;
 use crate::ui::footer;
 use crate::ui::widgets::tile_grid::ORANGE;
-use protocol::{AttentionLevel, Route};
+use protocol::{AgentHookStatus, AttentionLevel, Route};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceHit {
     Header,
+    WorkspaceTab(usize),
     TerminalTab(usize),
     TerminalPane,
     LogList(usize),
@@ -217,7 +218,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
             .unwrap_or(AttentionLevel::None),
     );
 
-    let title = ws_id
+    // Build git info for active workspace (right-aligned block title)
+    let git_info = ws_id
         .and_then(|id| app.workspaces.iter().find(|w| w.id == id))
         .map(|w| {
             let git = ws_id.and_then(|id| app.workspace_git.get(&id));
@@ -236,26 +238,83 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
                 }
                 _ => String::new(),
             };
-            format!(
-                "Workspace: {} ({})  {}  ◈{}{}",
-                w.name, w.path, branch, w.dirty_files, ab
-            )
+            format!(" ⎇ {}  ◈{}{} ", branch, w.dirty_files, ab)
         })
-        .unwrap_or_else(|| "Workspace".to_string());
+        .unwrap_or_default();
 
-    let (header_style, header_border_type) =
-        standard_border_style(false);
+    let git_title = Line::from(Span::styled(
+        git_info,
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    // Build workspace tab content
+    let flash_on = app.spinner_tick % 2 == 0;
+    let attention_enabled = app.settings.attention_notifications;
+    let content = if let Some(name) = &app.rename_workspace_input {
+        Line::from(format!(" Rename: {name}"))
+    } else {
+        let mut tab_spans: Vec<Span> = Vec::new();
+        tab_spans.push(Span::raw(" "));
+        for (i, ws) in app.workspaces.iter().enumerate() {
+            let is_active = Some(ws.id) == ws_id;
+            if i > 0 {
+                tab_spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            }
+            let ws_attention = app.effective_attention(ws.attention);
+            let hook_status = ws.agent_hook_status;
+            // Style and label based on hook status (preferred) or attention fallback.
+            let style = if is_active {
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD)
+            } else if attention_enabled
+                && matches!(ws_attention, AttentionLevel::Error)
+            {
+                if flash_on {
+                    Style::default()
+                        .fg(Color::Red)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                }
+            } else if hook_status == AgentHookStatus::NeedsPermission {
+                if flash_on {
+                    Style::default()
+                        .fg(ORANGE)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                }
+            } else if hook_status == AgentHookStatus::Done {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            let mut label = ws.name.clone();
+            if !is_active {
+                if attention_enabled && matches!(ws_attention, AttentionLevel::Error) {
+                    label = format!("✖ {label}");
+                } else {
+                    match hook_status {
+                        AgentHookStatus::NeedsPermission => label = format!("⚠ {label}"),
+                        AgentHookStatus::Done => label = format!("✓ {label}"),
+                        _ => {}
+                    }
+                }
+            }
+            tab_spans.push(Span::styled(label, style));
+        }
+        Line::from(tab_spans)
+    };
+
+    let (header_style, header_border_type) = standard_border_style(false);
     frame.render_widget(
-        Paragraph::new(if let Some(name) = &app.rename_workspace_input {
-            format!("{title}\nRename: {name}")
-        } else {
-            title
-        })
-        .block(
+        Paragraph::new(content).block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(header_style)
-                .border_type(header_border_type),
+                .border_type(header_border_type)
+                .title_top(git_title.right_aligned()),
         ),
         l.header,
     );
@@ -642,7 +701,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         };
         let is_active = i == app.ws_active_tab;
         let is_agent = matches!(tab.kind, protocol::TerminalKind::Agent);
-        let (border_style, border_type) = if is_active
+        // Flash non-active agent tab when attention is needed (user is on a different tab)
+        let (border_style, border_type) = if !is_active
             && is_agent
             && matches!(attention, AttentionLevel::NeedsInput | AttentionLevel::Error)
             && app.spinner_tick % 2 == 0
@@ -683,9 +743,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let terminal_lines = ws_id
         .map(|id| app.terminal_lines(id, &app.active_tab_id()))
         .unwrap_or_else(|| vec![Line::from("No terminal output yet.")]);
+    // Never flash the terminal pane border — the tab bar handles attention instead.
     let (term_style, term_border_type) =
-        pane_border_style(terminal_focused, attention, app.spinner_tick % 2 == 0);
-    let term_title = build_terminal_title_line(attention, app.spinner_tick % 2 == 0, app.active_tab_passthrough());
+        pane_border_style(terminal_focused, AttentionLevel::None, false);
+    let term_title = build_terminal_title_line(AttentionLevel::None, false, app.active_tab_passthrough());
     frame.render_widget(Clear, l.terminal_pane);
     frame.render_widget(
         Paragraph::new(terminal_lines).block(
@@ -874,6 +935,40 @@ pub fn hit_test(area: Rect, app: &TuiApp, x: u16, y: u16) -> Option<WorkspaceHit
 
     let point_inside = |r: Rect| x >= r.x && y >= r.y && x < r.right() && y < r.bottom();
     if point_inside(l.header) {
+        // Check if click is on the content line for workspace tab switching
+        let content_y = l.header.y + 1;
+        if y == content_y && app.rename_workspace_input.is_none() {
+            let active_id = match app.route {
+                Route::Workspace { id } => Some(id),
+                _ => None,
+            };
+            let attn_enabled = app.settings.attention_notifications;
+            let mut cursor = l.header.x + 1 + 1; // left border + leading space
+            for (i, ws) in app.workspaces.iter().enumerate() {
+                if i > 0 {
+                    cursor += 3; // " │ " separator
+                }
+                let is_active = Some(ws.id) == active_id;
+                let ws_attn = app.effective_attention(ws.attention);
+                let hook_status = ws.agent_hook_status;
+                let has_error_badge = !is_active
+                    && attn_enabled
+                    && matches!(ws_attn, AttentionLevel::Error);
+                let has_hook_badge = !is_active
+                    && !has_error_badge
+                    && matches!(hook_status, AgentHookStatus::NeedsPermission | AgentHookStatus::Done);
+                let prefix_w: u16 = if has_error_badge || has_hook_badge {
+                    2 // "✖ " / "⚠ " / "✓ " + space
+                } else {
+                    0
+                };
+                let label_w = prefix_w + ws.name.chars().count() as u16;
+                if x >= cursor && x < cursor + label_w {
+                    return Some(WorkspaceHit::WorkspaceTab(i));
+                }
+                cursor += label_w;
+            }
+        }
         return Some(WorkspaceHit::Header);
     }
     if point_inside(l.terminal_tabs) {
@@ -1035,6 +1130,7 @@ mod tests {
             shell_running: false,
             last_activity_unix_ms: 0,
             ssh_host: None,
+            agent_hook_status: AgentHookStatus::Unknown,
         }
     }
 
@@ -1251,5 +1347,97 @@ mod tests {
         app.set_workspace_git(id, make_git_state());
         app.ws_uncommitted_expanded = true;
         smoke_render_workspace(&app, 120, 40);
+    }
+
+    // ── WorkspaceHit::WorkspaceTab hit_test tests ───────────────────────
+
+    fn app_with_multiple_workspaces() -> (crate::app::TuiApp, Vec<uuid::Uuid>) {
+        let mut app = crate::app::TuiApp::default();
+        let mut ids = Vec::new();
+        for name in ["alpha", "beta", "gamma"] {
+            let mut ws = make_ws_summary();
+            ws.name = name.into();
+            ws.path = format!("/tmp/{name}");
+            ids.push(ws.id);
+            let mut all: Vec<_> = app.workspaces.clone();
+            all.push(ws);
+            app.set_workspaces(all);
+        }
+        app.open_workspace(ids[0]);
+        (app, ids)
+    }
+
+    #[test]
+    fn hit_test_workspace_tab_first() {
+        let (app, _ids) = app_with_multiple_workspaces();
+        let area = Rect::new(0, 0, 120, 40);
+        // Header content is at y=1 (between top/bottom border).
+        // Layout: border(x=0) + space(x=1) + "alpha" starts at x=2.
+        let hit = hit_test(area, &app, 3, 1);
+        assert_eq!(hit, Some(WorkspaceHit::WorkspaceTab(0)));
+    }
+
+    #[test]
+    fn hit_test_workspace_tab_second() {
+        let (app, _ids) = app_with_multiple_workspaces();
+        let area = Rect::new(0, 0, 120, 40);
+        // "alpha"(5) at x=2..7, then " │ "(3) at x=7..10, then "beta" at x=10..14
+        let hit = hit_test(area, &app, 11, 1);
+        assert_eq!(hit, Some(WorkspaceHit::WorkspaceTab(1)));
+    }
+
+    #[test]
+    fn hit_test_workspace_tab_third() {
+        let (app, _ids) = app_with_multiple_workspaces();
+        let area = Rect::new(0, 0, 120, 40);
+        // "alpha"(5) + " │ "(3) + "beta"(4) + " │ "(3) + "gamma" starts at x=17
+        let hit = hit_test(area, &app, 18, 1);
+        assert_eq!(hit, Some(WorkspaceHit::WorkspaceTab(2)));
+    }
+
+    #[test]
+    fn hit_test_workspace_tab_gap_is_header() {
+        let (app, _ids) = app_with_multiple_workspaces();
+        let area = Rect::new(0, 0, 120, 40);
+        // Click far to the right, past all tab names
+        let hit = hit_test(area, &app, 100, 1);
+        assert_eq!(hit, Some(WorkspaceHit::Header));
+    }
+
+    #[test]
+    fn hit_test_workspace_tab_border_line_is_header() {
+        let (app, _ids) = app_with_multiple_workspaces();
+        let area = Rect::new(0, 0, 120, 40);
+        // Click on top border (y=0), not content line
+        let hit = hit_test(area, &app, 3, 0);
+        assert_eq!(hit, Some(WorkspaceHit::Header));
+    }
+
+    #[test]
+    fn hit_test_workspace_tab_with_done_badge() {
+        let (mut app, ids) = app_with_multiple_workspaces();
+        // Set second workspace to Done — it gets "✓ " prefix (2 cells)
+        let mut workspaces = app.workspaces.clone();
+        workspaces[1].agent_hook_status = AgentHookStatus::Done;
+        app.set_workspaces(workspaces);
+        app.open_workspace(ids[0]);
+        let area = Rect::new(0, 0, 120, 40);
+        // "alpha"(5) + " │ "(3) = 8, then "✓ beta" starts at x=10
+        // "✓ " is 2 cells, "beta" is 4 cells = 6 total
+        let hit = hit_test(area, &app, 11, 1);
+        assert_eq!(hit, Some(WorkspaceHit::WorkspaceTab(1)));
+    }
+
+    #[test]
+    fn hit_test_workspace_tab_with_permission_badge() {
+        let (mut app, ids) = app_with_multiple_workspaces();
+        let mut workspaces = app.workspaces.clone();
+        workspaces[1].agent_hook_status = AgentHookStatus::NeedsPermission;
+        app.set_workspaces(workspaces);
+        app.open_workspace(ids[0]);
+        let area = Rect::new(0, 0, 120, 40);
+        // Same layout as done badge — "⚠ " prefix is also 2 cells
+        let hit = hit_test(area, &app, 11, 1);
+        assert_eq!(hit, Some(WorkspaceHit::WorkspaceTab(1)));
     }
 }
