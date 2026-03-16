@@ -108,7 +108,13 @@ fn normalize_for_match(input: &str) -> String {
     no_ansi
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_control() || is_terminal_decoration(c) { ' ' } else { c })
+        .map(|c| {
+            if c.is_ascii_control() || is_terminal_decoration(c) {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -366,9 +372,7 @@ mod tests {
     #[test]
     fn claude_code_permission_prompt_with_ansi() {
         let mut det = AttentionDetector::new();
-        det.append(
-            b"\x1b[1;33mThis command requires approval\x1b[0m\n\x1b[36mAllow once\x1b[0m",
-        );
+        det.append(b"\x1b[1;33mThis command requires approval\x1b[0m\n\x1b[36mAllow once\x1b[0m");
         assert!(det.check_for_prompt());
     }
 
@@ -390,7 +394,9 @@ mod tests {
     #[test]
     fn no_false_positive_ansi_normal_output() {
         let mut det = AttentionDetector::new();
-        det.append(b"\x1b[32m\xe2\x9c\x93 All tests passed\x1b[0m\n\x1b[32mBuild successful\x1b[0m");
+        det.append(
+            b"\x1b[32m\xe2\x9c\x93 All tests passed\x1b[0m\n\x1b[32mBuild successful\x1b[0m",
+        );
         assert!(!det.check_for_prompt());
     }
 
@@ -462,7 +468,9 @@ mod tests {
         for _ in 0..155 {
             buf.extend_from_slice("\u{2500}".as_bytes());
         }
-        buf.extend_from_slice(b" ? for shortcuts | Update available! Run: brew upgrade claude-code");
+        buf.extend_from_slice(
+            b" ? for shortcuts | Update available! Run: brew upgrade claude-code",
+        );
         det.append(&buf);
         assert!(det.check_for_prompt());
     }

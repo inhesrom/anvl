@@ -15,7 +15,14 @@ use tile_grid::ORANGE;
 pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
     let chunks = home_chunks(area);
     render_dashboard(frame, chunks[0], app);
-    tile_grid::render(frame, chunks[1], &app.workspaces, app.home_selected, app.spinner_tick % 2 == 0, app.settings.attention_notifications);
+    tile_grid::render(
+        frame,
+        chunks[1],
+        &app.workspaces,
+        app.home_selected,
+        app.spinner_tick % 2 == 0,
+        app.settings.attention_notifications,
+    );
     footer::render(frame, chunks[2], app);
     render_modals(frame, area, app);
 }
@@ -39,12 +46,14 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &TuiApp) {
     badge_spans.extend(dashboard_badge(needs_input, "\u{26A0}", "input", ORANGE));
     badge_spans.extend(dashboard_badge(errors, "\u{2716}", "error", Color::Red));
     badge_spans.extend(dashboard_badge(dirty, "\u{25C8}", "changes", Color::Yellow));
-    badge_spans.extend(dashboard_badge(running_agents, "\u{25CF}", "agents", Color::Green));
+    badge_spans.extend(dashboard_badge(
+        running_agents,
+        "\u{25CF}",
+        "agents",
+        Color::Green,
+    ));
 
-    let art_lines: Vec<Line> = vec![
-        Line::from(""),
-        Line::from(badge_spans),
-    ];
+    let art_lines: Vec<Line> = vec![Line::from(""), Line::from(badge_spans)];
 
     let dashboard = Paragraph::new(art_lines).block(
         Block::default()
@@ -70,9 +79,7 @@ fn dashboard_badge(count: usize, icon: &str, label: &str, color: Color) -> Vec<S
         vec![
             Span::styled(
                 format!("{} {} ", icon, count),
-                Style::default()
-                    .fg(color)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("{}     ", label),
@@ -112,7 +119,9 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
 
         // Path input section
         let path_style = if browser.editing_path {
-            Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::LightBlue)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
@@ -121,13 +130,12 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
         } else {
             browser.path_input.clone()
         };
-        let path_widget = Paragraph::new(path_display)
-            .block(
-                Block::default()
-                    .title(" Path ")
-                    .borders(Borders::ALL)
-                    .border_style(path_style),
-            );
+        let path_widget = Paragraph::new(path_display).block(
+            Block::default()
+                .title(" Path ")
+                .borders(Borders::ALL)
+                .border_style(path_style),
+        );
         frame.render_widget(path_widget, sections[0]);
 
         // Directory listing section
@@ -144,20 +152,20 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
                 .iter()
                 .map(|name| ListItem::new(format!("  {}/", name)))
                 .collect();
-            let list = List::new(items)
-                .highlight_symbol("> ")
-                .highlight_style(
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                );
+            let list = List::new(items).highlight_symbol("> ").highlight_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            );
             let mut list_state = ListState::default();
             list_state.select(Some(browser.selected));
             frame.render_stateful_widget(list, sections[1], &mut list_state);
         }
 
         // Hint bar section
-        let key_style = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+        let key_style = Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD);
         let desc_style = Style::default().fg(Color::DarkGray);
         let hints = if browser.editing_path {
             Line::from(vec![
@@ -186,10 +194,7 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
                 Span::styled(" select child", desc_style),
             ])
         };
-        frame.render_widget(
-            Paragraph::new(vec![Line::from(""), hints]),
-            sections[2],
-        );
+        frame.render_widget(Paragraph::new(vec![Line::from(""), hints]), sections[2]);
     }
 
     if let Some(ref picker) = app.ssh_history_picker {
@@ -224,18 +229,18 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
             })
             .collect();
 
-        let list = List::new(items)
-            .highlight_symbol("> ")
-            .highlight_style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            );
+        let list = List::new(items).highlight_symbol("> ").highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
         let mut list_state = ListState::default();
         list_state.select(Some(picker.selected));
         frame.render_stateful_widget(list, sections[0], &mut list_state);
 
-        let key_style = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+        let key_style = Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD);
         let desc_style = Style::default().fg(Color::DarkGray);
         let hints = Line::from(vec![
             Span::styled("j/k", key_style),
@@ -281,7 +286,9 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
         for (i, (label, value, field)) in fields.iter().enumerate() {
             let is_focused = ssh_input.focused_field == *field;
             let border_style = if is_focused {
-                Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
@@ -299,7 +306,9 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
             frame.render_widget(widget, sections[i]);
         }
 
-        let key_style = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+        let key_style = Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD);
         let desc_style = Style::default().fg(Color::DarkGray);
         let hints = Line::from(vec![
             Span::styled("Tab", key_style),
@@ -338,18 +347,17 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
             let modal = centered_rect(area, 56, 5);
             frame.render_widget(Clear, modal);
             frame.render_widget(
-                Paragraph::new(format!("{name}_"))
-                    .block(
-                        Block::default()
-                            .title("Rename Workspace (Enter to confirm, Esc to cancel)")
-                            .borders(Borders::ALL)
-                            .border_style(
-                                Style::default()
-                                    .fg(Color::LightBlue)
-                                    .add_modifier(Modifier::BOLD),
-                            )
-                            .border_type(BorderType::Thick),
-                    ),
+                Paragraph::new(format!("{name}_")).block(
+                    Block::default()
+                        .title("Rename Workspace (Enter to confirm, Esc to cancel)")
+                        .borders(Borders::ALL)
+                        .border_style(
+                            Style::default()
+                                .fg(Color::LightBlue)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .border_type(BorderType::Thick),
+                ),
                 modal,
             );
         }
@@ -359,19 +367,43 @@ fn render_modals(frame: &mut Frame, area: Rect, app: &TuiApp) {
         let modal = centered_rect(area, 50, 8);
         frame.render_widget(Clear, modal);
 
-        let cursor = if app.settings_selected == 0 { "> " } else { "  " };
+        let cursor = if app.settings_selected == 0 {
+            "> "
+        } else {
+            "  "
+        };
         let toggle = render_toggle(app.settings.attention_notifications);
         let row = Line::from(vec![
-            Span::styled(cursor, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                cursor,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("Attention notifications   "),
             toggle,
         ]);
         let hint = Line::from(vec![
-            Span::styled("j/k", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "j/k",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" navigate  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Space", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Space",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" toggle  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Esc", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Esc",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" close", Style::default().fg(Color::DarkGray)),
         ]);
         let body = vec![Line::from(""), row, Line::from(""), Line::from(""), hint];

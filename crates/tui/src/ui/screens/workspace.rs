@@ -67,9 +67,7 @@ fn layout(area: Rect, focus: crate::app::Focus, terminal_fullscreen: bool) -> Wo
             }
             crate::app::Focus::WsLog
             | crate::app::Focus::WsBranches
-            | crate::app::Focus::WsDiff => {
-                [Constraint::Percentage(35), Constraint::Percentage(65)]
-            }
+            | crate::app::Focus::WsDiff => [Constraint::Percentage(35), Constraint::Percentage(65)],
             _ => [Constraint::Percentage(55), Constraint::Percentage(45)],
         })
         .split(chunks[1]);
@@ -130,15 +128,11 @@ pub fn pane_border_style(
 ) -> (Style, BorderType) {
     match attention {
         AttentionLevel::NeedsInput if flash_on => (
-            Style::default()
-                .fg(ORANGE)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(ORANGE).add_modifier(Modifier::BOLD),
             BorderType::Thick,
         ),
         AttentionLevel::Error if flash_on => (
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             BorderType::Thick,
         ),
         _ => standard_border_style(focused),
@@ -165,29 +159,19 @@ pub fn build_terminal_title_line(
     let mut spans = match attention {
         AttentionLevel::NeedsInput => {
             let badge_style = if flash_on {
-                Style::default()
-                    .fg(ORANGE)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(ORANGE).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(ORANGE)
             };
-            vec![
-                Span::raw("Terminal "),
-                Span::styled("⚠ input", badge_style),
-            ]
+            vec![Span::raw("Terminal "), Span::styled("⚠ input", badge_style)]
         }
         AttentionLevel::Error => {
             let badge_style = if flash_on {
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Red)
             };
-            vec![
-                Span::raw("Terminal "),
-                Span::styled("✖ error", badge_style),
-            ]
+            vec![Span::raw("Terminal "), Span::styled("✖ error", badge_style)]
         }
         _ => vec![Span::raw("Terminal")],
     };
@@ -243,8 +227,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         })
         .unwrap_or_else(|| "Workspace".to_string());
 
-    let (header_style, header_border_type) =
-        standard_border_style(false);
+    let (header_style, header_border_type) = standard_border_style(false);
     frame.render_widget(
         Paragraph::new(if let Some(name) = &app.rename_workspace_input {
             format!("{title}\nRename: {name}")
@@ -261,346 +244,358 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
     );
 
     if !app.terminal_fullscreen {
-    // --- Git Log (merged uncommitted + commits + tags) ---
-    let changed = ws_id
-        .and_then(|id| app.workspace_git.get(&id))
-        .map(|g| g.changed.clone())
-        .unwrap_or_default();
-    let commits = ws_id
-        .and_then(|id| app.workspace_git.get(&id))
-        .map(|g| g.recent_commits.clone())
-        .unwrap_or_default();
-    let tags = ws_id
-        .and_then(|id| app.workspace_git.get(&id))
-        .map(|g| g.tags.clone())
-        .unwrap_or_default();
+        // --- Git Log (merged uncommitted + commits + tags) ---
+        let changed = ws_id
+            .and_then(|id| app.workspace_git.get(&id))
+            .map(|g| g.changed.clone())
+            .unwrap_or_default();
+        let commits = ws_id
+            .and_then(|id| app.workspace_git.get(&id))
+            .map(|g| g.recent_commits.clone())
+            .unwrap_or_default();
+        let tags = ws_id
+            .and_then(|id| app.workspace_git.get(&id))
+            .map(|g| g.tags.clone())
+            .unwrap_or_default();
 
-    let total = app.total_log_items();
-    let mut log_list_state = ListState::default();
-    if total > 0 {
-        log_list_state.select(Some(app.ws_selected_commit.min(total - 1)));
-    }
+        let total = app.total_log_items();
+        let mut log_list_state = ListState::default();
+        if total > 0 {
+            log_list_state.select(Some(app.ws_selected_commit.min(total - 1)));
+        }
 
-    let mut log_items: Vec<ListItem> = Vec::new();
+        let mut log_items: Vec<ListItem> = Vec::new();
 
-    // Uncommitted header
-    {
-        let arrow = if app.ws_uncommitted_expanded { "▼" } else { "▶" };
-        let count = changed.len();
-        let header_style = if count > 0 {
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        log_items.push(ListItem::new(Line::from(vec![
-            Span::styled(format!("{arrow} Uncommitted Changes"), header_style),
-            Span::styled(format!(" ({count})"), Style::default().fg(Color::DarkGray)),
-        ])));
-    }
-
-    // Expanded files
-    if app.ws_uncommitted_expanded && !changed.is_empty() {
-        for f in &changed {
-            let idx = f.index_status;
-            let wt = f.worktree_status;
-            let idx_style = match idx {
-                '?' => Style::default().fg(Color::Red),
-                ' ' => Style::default().fg(Color::DarkGray),
-                _ => Style::default().fg(Color::Green),
+        // Uncommitted header
+        {
+            let arrow = if app.ws_uncommitted_expanded {
+                "▼"
+            } else {
+                "▶"
             };
-            let wt_style = match wt {
-                '?' => Style::default().fg(Color::Red),
-                ' ' => Style::default().fg(Color::DarkGray),
-                _ => Style::default().fg(Color::Yellow),
+            let count = changed.len();
+            let header_style = if count > 0 {
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
             };
             log_items.push(ListItem::new(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(idx.to_string(), idx_style),
-                Span::styled(wt.to_string(), wt_style),
-                Span::raw(format!(" {}", f.path)),
+                Span::styled(format!("{arrow} Uncommitted Changes"), header_style),
+                Span::styled(format!(" ({count})"), Style::default().fg(Color::DarkGray)),
             ])));
         }
-    }
 
-    // Build tag lookup: commit hash → list of tag names
-    let tag_map = {
-        let mut m: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-        for t in &tags {
-            m.entry(t.hash.clone()).or_default().push(t.name.clone());
+        // Expanded files
+        if app.ws_uncommitted_expanded && !changed.is_empty() {
+            for f in &changed {
+                let idx = f.index_status;
+                let wt = f.worktree_status;
+                let idx_style = match idx {
+                    '?' => Style::default().fg(Color::Red),
+                    ' ' => Style::default().fg(Color::DarkGray),
+                    _ => Style::default().fg(Color::Green),
+                };
+                let wt_style = match wt {
+                    '?' => Style::default().fg(Color::Red),
+                    ' ' => Style::default().fg(Color::DarkGray),
+                    _ => Style::default().fg(Color::Yellow),
+                };
+                log_items.push(ListItem::new(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(idx.to_string(), idx_style),
+                    Span::styled(wt.to_string(), wt_style),
+                    Span::raw(format!(" {}", f.path)),
+                ])));
+            }
         }
-        m
-    };
 
-    // Commits
-    for (i, c) in commits.iter().enumerate() {
-        // When tag filter is active, skip commits without tags
-        if app.ws_tag_filter && !tag_map.contains_key(&c.hash) {
-            continue;
-        }
-        let is_expanded = app.ws_expanded_commit == Some(i);
-        let arrow = if is_expanded { "▼ " } else { "▶ " };
-        let mut spans = vec![
-            Span::styled(
+        // Build tag lookup: commit hash → list of tag names
+        let tag_map = {
+            let mut m: std::collections::HashMap<String, Vec<String>> =
+                std::collections::HashMap::new();
+            for t in &tags {
+                m.entry(t.hash.clone()).or_default().push(t.name.clone());
+            }
+            m
+        };
+
+        // Commits
+        for (i, c) in commits.iter().enumerate() {
+            // When tag filter is active, skip commits without tags
+            if app.ws_tag_filter && !tag_map.contains_key(&c.hash) {
+                continue;
+            }
+            let is_expanded = app.ws_expanded_commit == Some(i);
+            let arrow = if is_expanded { "▼ " } else { "▶ " };
+            let mut spans = vec![Span::styled(
                 format!("{arrow}{} ", c.hash),
                 Style::default().fg(Color::Yellow),
-            ),
-        ];
-        // Inline tag badges right after hash
-        if let Some(tag_names) = tag_map.get(&c.hash) {
-            for name in tag_names {
-                spans.push(Span::styled(
-                    format!("[{name}] "),
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                ));
-            }
-        }
-        spans.push(Span::raw(&c.message));
-        spans.push(Span::styled(
-            format!(" ({}, {})", c.author, c.date),
-            Style::default().fg(Color::DarkGray),
-        ));
-        log_items.push(ListItem::new(Line::from(spans)));
-        if is_expanded {
-            if let Some(files) = app.commit_files_cache.get(&c.hash) {
-                for f in files {
-                    log_items.push(ListItem::new(Line::from(Span::raw(format!("    {f}")))));
-                }
-            }
-        }
-    }
-
-    let (log_style, log_border_type) = standard_border_style(app.focus == crate::app::Focus::WsLog);
-    let commit_list = List::new(log_items)
-        .block(
-            Block::default()
-                .title("Git Log")
-                .borders(Borders::ALL)
-                .border_style(log_style)
-                .border_type(log_border_type),
-        )
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
-    frame.render_stateful_widget(commit_list, l.git_log, &mut log_list_state);
-
-    // --- Branches Pane ---
-    {
-        let branch_split = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(l.git_branches);
-
-        let is_branches_focused = app.focus == crate::app::Focus::WsBranches;
-        let local_active = matches!(app.ws_branch_sub_pane, crate::app::BranchSubPane::Local);
-        let remote_active = matches!(app.ws_branch_sub_pane, crate::app::BranchSubPane::Remote);
-
-        // Local branches
-        let local_branches = ws_id
-            .and_then(|id| app.workspace_git.get(&id))
-            .map(|g| g.local_branches.clone())
-            .unwrap_or_default();
-        let mut local_list_state = ListState::default();
-        if !local_branches.is_empty() {
-            local_list_state.select(Some(
-                app.ws_selected_local_branch.min(local_branches.len() - 1),
-            ));
-        }
-        let local_items = local_branches
-            .iter()
-            .map(|b| {
-                let mut spans = Vec::new();
-                if b.is_head {
+            )];
+            // Inline tag badges right after hash
+            if let Some(tag_names) = tag_map.get(&c.hash) {
+                for name in tag_names {
                     spans.push(Span::styled(
-                        "* ",
+                        format!("[{name}] "),
                         Style::default()
-                            .fg(Color::Green)
+                            .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
                     ));
-                } else {
-                    spans.push(Span::raw("  "));
                 }
-                let name_style = if b.is_head {
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
-                spans.push(Span::styled(b.name.clone(), name_style));
-                let git_op_active = b.is_head && ws_id.map(|id| app.is_git_op_in_progress(id)).unwrap_or(false);
-                if git_op_active {
-                    // Re-style all existing spans yellow during git ops
-                    let yellow_bold = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
-                    for s in &mut spans {
-                        *s = Span::styled(s.content.clone(), yellow_bold);
+            }
+            spans.push(Span::raw(&c.message));
+            spans.push(Span::styled(
+                format!(" ({}, {})", c.author, c.date),
+                Style::default().fg(Color::DarkGray),
+            ));
+            log_items.push(ListItem::new(Line::from(spans)));
+            if is_expanded {
+                if let Some(files) = app.commit_files_cache.get(&c.hash) {
+                    for f in files {
+                        log_items.push(ListItem::new(Line::from(Span::raw(format!("    {f}")))));
                     }
-                    spans.push(Span::styled(
-                        format!(" {}", spinner_frame(app.spinner_tick)),
-                        yellow_bold,
-                    ));
                 }
-                // Ahead/behind indicators
-                match (b.ahead, b.behind) {
-                    (Some(a), Some(b_count)) if a == 0 && b_count == 0 => {
+            }
+        }
+
+        let (log_style, log_border_type) =
+            standard_border_style(app.focus == crate::app::Focus::WsLog);
+        let commit_list = List::new(log_items)
+            .block(
+                Block::default()
+                    .title("Git Log")
+                    .borders(Borders::ALL)
+                    .border_style(log_style)
+                    .border_type(log_border_type),
+            )
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            );
+        frame.render_stateful_widget(commit_list, l.git_log, &mut log_list_state);
+
+        // --- Branches Pane ---
+        {
+            let branch_split = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(l.git_branches);
+
+            let is_branches_focused = app.focus == crate::app::Focus::WsBranches;
+            let local_active = matches!(app.ws_branch_sub_pane, crate::app::BranchSubPane::Local);
+            let remote_active = matches!(app.ws_branch_sub_pane, crate::app::BranchSubPane::Remote);
+
+            // Local branches
+            let local_branches = ws_id
+                .and_then(|id| app.workspace_git.get(&id))
+                .map(|g| g.local_branches.clone())
+                .unwrap_or_default();
+            let mut local_list_state = ListState::default();
+            if !local_branches.is_empty() {
+                local_list_state.select(Some(
+                    app.ws_selected_local_branch.min(local_branches.len() - 1),
+                ));
+            }
+            let local_items = local_branches
+                .iter()
+                .map(|b| {
+                    let mut spans = Vec::new();
+                    if b.is_head {
                         spans.push(Span::styled(
-                            " =",
-                            Style::default().add_modifier(Modifier::DIM),
+                            "* ",
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                    } else {
+                        spans.push(Span::raw("  "));
+                    }
+                    let name_style = if b.is_head {
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    spans.push(Span::styled(b.name.clone(), name_style));
+                    let git_op_active = b.is_head
+                        && ws_id
+                            .map(|id| app.is_git_op_in_progress(id))
+                            .unwrap_or(false);
+                    if git_op_active {
+                        // Re-style all existing spans yellow during git ops
+                        let yellow_bold = Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD);
+                        for s in &mut spans {
+                            *s = Span::styled(s.content.clone(), yellow_bold);
+                        }
+                        spans.push(Span::styled(
+                            format!(" {}", spinner_frame(app.spinner_tick)),
+                            yellow_bold,
                         ));
                     }
-                    (ahead, behind) => {
-                        if let Some(a) = ahead {
-                            if a > 0 {
-                                spans.push(Span::styled(
-                                    format!(" \u{2191}{a}"),
-                                    Style::default().fg(Color::Green),
-                                ));
-                            }
+                    // Ahead/behind indicators
+                    match (b.ahead, b.behind) {
+                        (Some(a), Some(b_count)) if a == 0 && b_count == 0 => {
+                            spans.push(Span::styled(
+                                " =",
+                                Style::default().add_modifier(Modifier::DIM),
+                            ));
                         }
-                        if let Some(b_count) = behind {
-                            if b_count > 0 {
-                                spans.push(Span::styled(
-                                    format!(" \u{2193}{b_count}"),
-                                    Style::default().fg(Color::Red),
-                                ));
+                        (ahead, behind) => {
+                            if let Some(a) = ahead {
+                                if a > 0 {
+                                    spans.push(Span::styled(
+                                        format!(" \u{2191}{a}"),
+                                        Style::default().fg(Color::Green),
+                                    ));
+                                }
+                            }
+                            if let Some(b_count) = behind {
+                                if b_count > 0 {
+                                    spans.push(Span::styled(
+                                        format!(" \u{2193}{b_count}"),
+                                        Style::default().fg(Color::Red),
+                                    ));
+                                }
                             }
                         }
                     }
+                    ListItem::new(Line::from(spans))
+                })
+                .collect::<Vec<_>>();
+
+            let local_title = if is_branches_focused && local_active {
+                "Local [*]"
+            } else {
+                "Local"
+            };
+            let (local_style, local_border_type) = if is_branches_focused && local_active {
+                (
+                    Style::default()
+                        .fg(Color::LightBlue)
+                        .add_modifier(Modifier::BOLD),
+                    BorderType::Thick,
+                )
+            } else {
+                (
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                    BorderType::Plain,
+                )
+            };
+            let local_list = List::new(local_items)
+                .block(
+                    Block::default()
+                        .title(local_title)
+                        .borders(Borders::ALL)
+                        .border_style(local_style)
+                        .border_type(local_border_type),
+                )
+                .highlight_style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                );
+            frame.render_stateful_widget(local_list, branch_split[0], &mut local_list_state);
+
+            // Remote branches
+            let remote_branches = ws_id
+                .and_then(|id| app.workspace_git.get(&id))
+                .map(|g| g.remote_branches.clone())
+                .unwrap_or_default();
+            let mut remote_list_state = ListState::default();
+            if !remote_branches.is_empty() {
+                remote_list_state.select(Some(
+                    app.ws_selected_remote_branch.min(remote_branches.len() - 1),
+                ));
+            }
+            let remote_items = remote_branches
+                .iter()
+                .map(|b| ListItem::new(Line::from(Span::raw(format!("  {}", b.full_name)))))
+                .collect::<Vec<_>>();
+
+            let remote_title = if is_branches_focused && remote_active {
+                "Remote [*]"
+            } else {
+                "Remote"
+            };
+            let (remote_style, remote_border_type) = if is_branches_focused && remote_active {
+                (
+                    Style::default()
+                        .fg(Color::LightBlue)
+                        .add_modifier(Modifier::BOLD),
+                    BorderType::Thick,
+                )
+            } else {
+                (
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                    BorderType::Plain,
+                )
+            };
+            let remote_list = List::new(remote_items)
+                .block(
+                    Block::default()
+                        .title(remote_title)
+                        .borders(Borders::ALL)
+                        .border_style(remote_style)
+                        .border_type(remote_border_type),
+                )
+                .highlight_style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                );
+            frame.render_stateful_widget(remote_list, branch_split[1], &mut remote_list_state);
+        }
+
+        // --- Diff Pane ---
+        let diff_text = ws_id
+            .and_then(|id| app.workspace_diff.get(&id))
+            .map(|(_, d)| d.clone())
+            .unwrap_or_else(|| "Select a file and press Enter to load diff.".to_string());
+        let diff_lines = diff_text
+            .lines()
+            .map(|line| {
+                if line.starts_with('+') {
+                    Line::from(Span::styled(
+                        line.to_string(),
+                        Style::default().fg(Color::Green),
+                    ))
+                } else if line.starts_with('-') {
+                    Line::from(Span::styled(
+                        line.to_string(),
+                        Style::default().fg(Color::Red),
+                    ))
+                } else {
+                    Line::from(Span::raw(line.to_string()))
                 }
-                ListItem::new(Line::from(spans))
             })
             .collect::<Vec<_>>();
-
-        let local_title = if is_branches_focused && local_active {
-            "Local [*]"
-        } else {
-            "Local"
-        };
-        let (local_style, local_border_type) = if is_branches_focused && local_active {
-            (
-                Style::default()
-                    .fg(Color::LightBlue)
-                    .add_modifier(Modifier::BOLD),
-                BorderType::Thick,
-            )
-        } else {
-            (
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::DIM),
-                BorderType::Plain,
-            )
-        };
-        let local_list = List::new(local_items)
-            .block(
-                Block::default()
-                    .title(local_title)
-                    .borders(Borders::ALL)
-                    .border_style(local_style)
-                    .border_type(local_border_type),
-            )
-            .highlight_style(
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            );
-        frame.render_stateful_widget(local_list, branch_split[0], &mut local_list_state);
-
-        // Remote branches
-        let remote_branches = ws_id
-            .and_then(|id| app.workspace_git.get(&id))
-            .map(|g| g.remote_branches.clone())
-            .unwrap_or_default();
-        let mut remote_list_state = ListState::default();
-        if !remote_branches.is_empty() {
-            remote_list_state.select(Some(
-                app.ws_selected_remote_branch
-                    .min(remote_branches.len() - 1),
-            ));
-        }
-        let remote_items = remote_branches
-            .iter()
-            .map(|b| ListItem::new(Line::from(Span::raw(format!("  {}", b.full_name)))))
-            .collect::<Vec<_>>();
-
-        let remote_title = if is_branches_focused && remote_active {
-            "Remote [*]"
-        } else {
-            "Remote"
-        };
-        let (remote_style, remote_border_type) = if is_branches_focused && remote_active {
-            (
-                Style::default()
-                    .fg(Color::LightBlue)
-                    .add_modifier(Modifier::BOLD),
-                BorderType::Thick,
-            )
-        } else {
-            (
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::DIM),
-                BorderType::Plain,
-            )
-        };
-        let remote_list = List::new(remote_items)
-            .block(
-                Block::default()
-                    .title(remote_title)
-                    .borders(Borders::ALL)
-                    .border_style(remote_style)
-                    .border_type(remote_border_type),
-            )
-            .highlight_style(
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            );
-        frame.render_stateful_widget(remote_list, branch_split[1], &mut remote_list_state);
-    }
-
-    // --- Diff Pane ---
-    let diff_text = ws_id
-        .and_then(|id| app.workspace_diff.get(&id))
-        .map(|(_, d)| d.clone())
-        .unwrap_or_else(|| "Select a file and press Enter to load diff.".to_string());
-    let diff_lines = diff_text
-        .lines()
-        .map(|line| {
-            if line.starts_with('+') {
-                Line::from(Span::styled(
-                    line.to_string(),
-                    Style::default().fg(Color::Green),
-                ))
-            } else if line.starts_with('-') {
-                Line::from(Span::styled(
-                    line.to_string(),
-                    Style::default().fg(Color::Red),
-                ))
-            } else {
-                Line::from(Span::raw(line.to_string()))
-            }
-        })
-        .collect::<Vec<_>>();
-    let (diff_style, diff_border_type) =
-        standard_border_style(app.focus == crate::app::Focus::WsDiff);
-    frame.render_widget(
-        Paragraph::new(diff_lines)
-            .block(
-                Block::default()
-                    .title("Diff")
-                    .borders(Borders::ALL)
-                    .border_style(diff_style)
-                    .border_type(diff_border_type),
-            )
-            .scroll((app.ws_diff_scroll, 0))
-            .wrap(Wrap { trim: false }),
-        l.git_diff,
-    );
+        let (diff_style, diff_border_type) =
+            standard_border_style(app.focus == crate::app::Focus::WsDiff);
+        frame.render_widget(
+            Paragraph::new(diff_lines)
+                .block(
+                    Block::default()
+                        .title("Diff")
+                        .borders(Borders::ALL)
+                        .border_style(diff_style)
+                        .border_type(diff_border_type),
+                )
+                .scroll((app.ws_diff_scroll, 0))
+                .wrap(Wrap { trim: false }),
+            l.git_diff,
+        );
     } // end if !terminal_fullscreen
 
     // --- Terminal Tabs ---
@@ -644,7 +639,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         let is_agent = matches!(tab.kind, protocol::TerminalKind::Agent);
         let (border_style, border_type) = if is_active
             && is_agent
-            && matches!(attention, AttentionLevel::NeedsInput | AttentionLevel::Error)
+            && matches!(
+                attention,
+                AttentionLevel::NeedsInput | AttentionLevel::Error
+            )
             && app.spinner_tick % 2 == 0
         {
             let color = match attention {
@@ -685,7 +683,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         .unwrap_or_else(|| vec![Line::from("No terminal output yet.")]);
     let (term_style, term_border_type) =
         pane_border_style(terminal_focused, attention, app.spinner_tick % 2 == 0);
-    let term_title = build_terminal_title_line(attention, app.spinner_tick % 2 == 0, app.active_tab_passthrough());
+    let term_title = build_terminal_title_line(
+        attention,
+        app.spinner_tick % 2 == 0,
+        app.active_tab_passthrough(),
+    );
     frame.render_widget(Clear, l.terminal_pane);
     frame.render_widget(
         Paragraph::new(terminal_lines).block(
@@ -798,11 +800,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
                     Block::default()
                         .title("Confirm (y/Enter = yes, n/Esc = cancel)")
                         .borders(Borders::ALL)
-                        .border_style(
-                            Style::default()
-                                .fg(Color::Red)
-                                .add_modifier(Modifier::BOLD),
-                        )
+                        .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
                         .border_type(BorderType::Thick),
                 )
                 .wrap(Wrap { trim: false }),
@@ -913,7 +911,11 @@ pub fn hit_test(area: Rect, app: &TuiApp, x: u16, y: u16) -> Option<WorkspaceHit
     None
 }
 
-pub fn terminal_content_rect(area: Rect, focus: crate::app::Focus, terminal_fullscreen: bool) -> Rect {
+pub fn terminal_content_rect(
+    area: Rect,
+    focus: crate::app::Focus,
+    terminal_fullscreen: bool,
+) -> Rect {
     let pane = layout(area, focus, terminal_fullscreen).terminal_pane;
     Rect::new(
         pane.x.saturating_add(1),
@@ -1018,8 +1020,8 @@ mod tests {
 
     // --- hit_test tests ---
 
-    use protocol::WorkspaceSummary;
     use crate::app::Focus;
+    use protocol::WorkspaceSummary;
 
     fn make_ws_summary() -> WorkspaceSummary {
         WorkspaceSummary {

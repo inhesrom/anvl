@@ -119,7 +119,12 @@ fn render_tile(
 }
 
 /// Computes the border style based on attention level, selection, and flash phase.
-fn tile_border_style(ws: &WorkspaceSummary, is_selected: bool, flash_on: bool, attention_enabled: bool) -> Style {
+fn tile_border_style(
+    ws: &WorkspaceSummary,
+    is_selected: bool,
+    flash_on: bool,
+    attention_enabled: bool,
+) -> Style {
     if !attention_enabled {
         return if is_selected {
             Style::default()
@@ -166,7 +171,11 @@ fn tile_border_style(ws: &WorkspaceSummary, is_selected: bool, flash_on: bool, a
 
 /// Builds the right-aligned status badge for attention states.
 /// Returns an empty line for non-attention tiles.
-fn build_status_badge(attention: &AttentionLevel, flash_on: bool, attention_enabled: bool) -> Line<'static> {
+fn build_status_badge(
+    attention: &AttentionLevel,
+    flash_on: bool,
+    attention_enabled: bool,
+) -> Line<'static> {
     if !attention_enabled {
         return Line::from("");
     }

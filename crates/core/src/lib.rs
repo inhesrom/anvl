@@ -63,16 +63,6 @@ pub fn spawn_core() -> CoreHandle {
                     let id = Uuid::new_v4();
                     let repo_path = std::path::PathBuf::from(&path);
 
-                    // Validate SSH connection if applicable
-                    if let Some(ref target) = ssh {
-                        if let Err(e) = ssh::validate_ssh_connection(target, &repo_path).await {
-                            let _ = evt_tx_task.send(Event::Error {
-                                message: format!("SSH workspace creation failed: {e}"),
-                            });
-                            continue;
-                        }
-                    }
-
                     let initial_git = refresh_git(&repo_path, ssh.as_ref()).await.unwrap_or_default();
                     let ws = Workspace {
                         id,
@@ -877,7 +867,9 @@ async fn restore_workspaces(state: &mut AppState, evt_tx: &broadcast::Sender<Eve
     for item in items {
         let id = Uuid::new_v4();
         let repo_path = PathBuf::from(item.path);
-        let initial_git = refresh_git(&repo_path, item.ssh.as_ref()).await.unwrap_or_default();
+        let initial_git = refresh_git(&repo_path, item.ssh.as_ref())
+            .await
+            .unwrap_or_default();
         let ws = Workspace {
             id,
             name: item.name,
@@ -940,7 +932,10 @@ mod tests {
 
     #[test]
     fn normalize_tab_id_agent_none_returns_agent() {
-        assert_eq!(normalize_tab_id(protocol::TerminalKind::Agent, None), "agent");
+        assert_eq!(
+            normalize_tab_id(protocol::TerminalKind::Agent, None),
+            "agent"
+        );
     }
 
     #[test]
@@ -961,7 +956,10 @@ mod tests {
 
     #[test]
     fn normalize_tab_id_shell_none_returns_default() {
-        assert_eq!(normalize_tab_id(protocol::TerminalKind::Shell, None), "shell");
+        assert_eq!(
+            normalize_tab_id(protocol::TerminalKind::Shell, None),
+            "shell"
+        );
     }
 
     #[test]

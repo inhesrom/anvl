@@ -1,7 +1,9 @@
 use anyhow::Result;
 use std::path::Path;
 
-use protocol::{BranchInfo, ChangedFile, CommitInfo, GitState, RemoteBranchInfo, SshTarget, TagInfo};
+use protocol::{
+    BranchInfo, ChangedFile, CommitInfo, GitState, RemoteBranchInfo, SshTarget, TagInfo,
+};
 
 use super::ssh;
 
@@ -50,38 +52,21 @@ async fn refresh_git_ssh(repo: &Path, target: &SshTarget) -> Result<GitState> {
         .output()
         .await?;
 
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let sections: Vec<&str> = stdout.split(ssh::BATCH_DELIM).collect();
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let message = stderr.trim();
+        anyhow::bail!(
+            "SSH git refresh failed for {}: {}",
+            repo.display(),
+            if message.is_empty() {
+                "remote command failed"
+            } else {
+                message
+            }
+        );
+    }
 
-    // Helper: get section by index, trimmed
-    let section = |i: usize| -> &str {
-        sections.get(i).map(|s| s.trim()).unwrap_or("")
-    };
-
-    let branch = parse_branch_output(section(0));
-    let changed = parse_status_output(section(1));
-    let upstream = parse_upstream_name(section(2));
-    let (ahead, behind) = if upstream.is_some() {
-        parse_ahead_behind(section(3))
-    } else {
-        (None, None)
-    };
-    let recent_commits = parse_commits_output(section(4));
-    let local_branches = parse_local_branches_output(section(5));
-    let remote_branches = parse_remote_branches_output(section(6));
-    let tags = parse_tags_output(section(7));
-
-    Ok(GitState {
-        branch,
-        upstream,
-        ahead,
-        behind,
-        changed,
-        recent_commits,
-        local_branches,
-        remote_branches,
-        tags,
-    })
+    parse_refresh_git_ssh_stdout(&String::from_utf8_lossy(&out.stdout))
 }
 
 // ---------------------------------------------------------------------------
@@ -89,11 +74,10 @@ async fn refresh_git_ssh(repo: &Path, target: &SshTarget) -> Result<GitState> {
 // ---------------------------------------------------------------------------
 
 async fn refresh_git_local(repo: &Path) -> Result<GitState> {
-    let branch_fut = ssh::build_command(None, repo, "git", &["rev-parse", "--abbrev-ref", "HEAD"])
-        .output();
+    let branch_fut =
+        ssh::build_command(None, repo, "git", &["rev-parse", "--abbrev-ref", "HEAD"]).output();
 
-    let status_fut =
-        ssh::build_command(None, repo, "git", &["status", "--porcelain=v1"]).output();
+    let status_fut = ssh::build_command(None, repo, "git", &["status", "--porcelain=v1"]).output();
 
     let upstream_fut = get_upstream_status(repo);
     let commits_fut = get_recent_commits(repo, 20);
@@ -101,13 +85,27 @@ async fn refresh_git_local(repo: &Path) -> Result<GitState> {
     let remote_branches_fut = get_remote_branches(repo);
     let tags_fut = get_tags(repo);
 
-    let (branch_out, status_out, (upstream, ahead, behind), recent_commits, local_branches, remote_branches, tags) =
-        tokio::join!(branch_fut, status_fut, upstream_fut, commits_fut, local_branches_fut, remote_branches_fut, tags_fut);
+    let (
+        branch_out,
+        status_out,
+        (upstream, ahead, behind),
+        recent_commits,
+        local_branches,
+        remote_branches,
+        tags,
+    ) = tokio::join!(
+        branch_fut,
+        status_fut,
+        upstream_fut,
+        commits_fut,
+        local_branches_fut,
+        remote_branches_fut,
+        tags_fut
+    );
 
     let branch = match branch_out {
         Ok(out) if out.status.success() => {
-            Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-                .filter(|s| !s.is_empty())
+            Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
         }
         _ => None,
     };
@@ -142,19 +140,73 @@ async fn refresh_git_local(repo: &Path) -> Result<GitState> {
 
 fn parse_branch_output(output: &str) -> Option<String> {
     let s = output.trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 fn parse_status_output(output: &str) -> Vec<ChangedFile> {
-    output
-        .lines()
-        .filter_map(parse_porcelain_line)
-        .collect()
+    output.lines().filter_map(parse_porcelain_line).collect()
+}
+
+fn parse_refresh_git_ssh_stdout(stdout: &str) -> Result<GitState> {
+    const SECTION_COUNT: usize = 8;
+
+    let sections = split_batch_sections(stdout, SECTION_COUNT)?;
+    let section = |i: usize| sections.get(i).copied().unwrap_or("");
+
+    let branch = parse_branch_output(section(0));
+    let changed = parse_status_output(section(1));
+    let upstream = parse_upstream_name(section(2));
+    let (ahead, behind) = if upstream.is_some() {
+        parse_ahead_behind(section(3))
+    } else {
+        (None, None)
+    };
+    let recent_commits = parse_commits_output(section(4));
+    let local_branches = parse_local_branches_output(section(5));
+    let remote_branches = parse_remote_branches_output(section(6));
+    let tags = parse_tags_output(section(7));
+
+    Ok(GitState {
+        branch,
+        upstream,
+        ahead,
+        behind,
+        changed,
+        recent_commits,
+        local_branches,
+        remote_branches,
+        tags,
+    })
+}
+
+fn split_batch_sections<'a>(stdout: &'a str, expected: usize) -> Result<Vec<&'a str>> {
+    let sections: Vec<&str> = stdout
+        .split(ssh::BATCH_DELIM)
+        // Preserve leading spaces because porcelain status and non-HEAD branch lines
+        // use fixed-width prefixes that the local parser depends on.
+        .map(|section| section.trim_matches(['\r', '\n']))
+        .collect();
+    if sections.len() != expected {
+        anyhow::bail!(
+            "SSH git refresh returned {} section(s); expected {}",
+            sections.len(),
+            expected
+        );
+    }
+    Ok(sections)
 }
 
 fn parse_upstream_name(output: &str) -> Option<String> {
     let s = output.trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 fn parse_ahead_behind(output: &str) -> (Option<u32>, Option<u32>) {
@@ -251,9 +303,7 @@ fn parse_remote_branches_output(output: &str) -> Vec<RemoteBranchInfo> {
 // Local-only async helpers (used by refresh_git_local)
 // ---------------------------------------------------------------------------
 
-async fn get_upstream_status(
-    repo: &Path,
-) -> (Option<String>, Option<u32>, Option<u32>) {
+async fn get_upstream_status(repo: &Path) -> (Option<String>, Option<u32>, Option<u32>) {
     let upstream_out = ssh::build_command(
         None,
         repo,
@@ -368,7 +418,12 @@ async fn get_tags(repo: &Path) -> Vec<TagInfo> {
         None,
         repo,
         "git",
-        &["for-each-ref", "--sort=-creatordate", "refs/tags/", format_arg],
+        &[
+            "for-each-ref",
+            "--sort=-creatordate",
+            "refs/tags/",
+            format_arg,
+        ],
     )
     .output()
     .await;
@@ -379,10 +434,7 @@ async fn get_tags(repo: &Path) -> Vec<TagInfo> {
     }
 
     let text = String::from_utf8_lossy(&out.stdout);
-    parse_tags_output(&text)
-        .into_iter()
-        .take(20)
-        .collect()
+    parse_tags_output(&text).into_iter().take(20).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -442,11 +494,16 @@ pub async fn diff_file(repo: &Path, file: &str, ssh: Option<&SshTarget>) -> Resu
         return Ok(text);
     }
 
-    let tracked = ssh::build_command(ssh, repo, "git", &["ls-files", "--error-unmatch", "--", file])
-        .output()
-        .await
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+    let tracked = ssh::build_command(
+        ssh,
+        repo,
+        "git",
+        &["ls-files", "--error-unmatch", "--", file],
+    )
+    .output()
+    .await
+    .map(|o| o.status.success())
+    .unwrap_or(false);
     if tracked {
         return Ok(text);
     }
@@ -529,10 +586,19 @@ pub async fn diff_commit(repo: &Path, hash: &str, ssh: Option<&SshTarget>) -> Re
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-pub async fn list_commit_files(repo: &Path, hash: &str, ssh: Option<&SshTarget>) -> Result<Vec<String>> {
-    let out = ssh::build_command(ssh, repo, "git", &["diff-tree", "--no-commit-id", "--name-only", "-r", hash])
-        .output()
-        .await?;
+pub async fn list_commit_files(
+    repo: &Path,
+    hash: &str,
+    ssh: Option<&SshTarget>,
+) -> Result<Vec<String>> {
+    let out = ssh::build_command(
+        ssh,
+        repo,
+        "git",
+        &["diff-tree", "--no-commit-id", "--name-only", "-r", hash],
+    )
+    .output()
+    .await?;
     Ok(String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter(|l| !l.is_empty())
@@ -540,7 +606,12 @@ pub async fn list_commit_files(repo: &Path, hash: &str, ssh: Option<&SshTarget>)
         .collect())
 }
 
-pub async fn diff_commit_file(repo: &Path, hash: &str, file: &str, ssh: Option<&SshTarget>) -> Result<String> {
+pub async fn diff_commit_file(
+    repo: &Path,
+    hash: &str,
+    file: &str,
+    ssh: Option<&SshTarget>,
+) -> Result<String> {
     let out = ssh::build_command(ssh, repo, "git", &["show", hash, "--format=", "--", file])
         .output()
         .await?;
@@ -552,10 +623,7 @@ pub async fn stage_file(repo: &Path, file: &str, ssh: Option<&SshTarget>) -> Res
         .output()
         .await?;
     if !out.status.success() {
-        anyhow::bail!(
-            "git add failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("git add failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     Ok(())
 }
@@ -565,10 +633,7 @@ pub async fn unstage_file(repo: &Path, file: &str, ssh: Option<&SshTarget>) -> R
         .output()
         .await?;
     if !out.status.success() {
-        anyhow::bail!(
-            "git reset failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("git reset failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     Ok(())
 }
@@ -591,10 +656,7 @@ pub async fn unstage_all(repo: &Path, ssh: Option<&SshTarget>) -> Result<()> {
         .output()
         .await?;
     if !out.status.success() {
-        anyhow::bail!(
-            "git reset failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("git reset failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     Ok(())
 }
@@ -631,9 +693,14 @@ pub async fn checkout_remote_branch(
     local_name: &str,
     ssh: Option<&SshTarget>,
 ) -> Result<()> {
-    let out = ssh::build_command(ssh, repo, "git", &["checkout", "-b", local_name, remote_branch])
-        .output()
-        .await?;
+    let out = ssh::build_command(
+        ssh,
+        repo,
+        "git",
+        &["checkout", "-b", local_name, remote_branch],
+    )
+    .output()
+    .await?;
     if !out.status.success() {
         anyhow::bail!(
             "git checkout failed: {}",
@@ -757,10 +824,7 @@ pub async fn discard_file(
                 .output()
                 .await?;
             if !out.status.success() {
-                anyhow::bail!(
-                    "git reset failed: {}",
-                    String::from_utf8_lossy(&out.stderr)
-                );
+                anyhow::bail!("git reset failed: {}", String::from_utf8_lossy(&out.stderr));
             }
         }
         // Restore working tree
@@ -788,10 +852,7 @@ pub async fn git_stash(repo: &Path, message: Option<&str>, ssh: Option<&SshTarge
             .await?
     };
     if !out.status.success() {
-        anyhow::bail!(
-            "git stash failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        anyhow::bail!("git stash failed: {}", String::from_utf8_lossy(&out.stderr));
     }
     Ok(())
 }
@@ -909,7 +970,8 @@ mod tests {
 
     #[test]
     fn commits_output_skips_malformed() {
-        let input = "abc123\x1ffix bug\x1fdev\x1f2h ago\nbad line\ndef456\x1fadd\x1fother\x1f1d ago";
+        let input =
+            "abc123\x1ffix bug\x1fdev\x1f2h ago\nbad line\ndef456\x1fadd\x1fother\x1f1d ago";
         let commits = parse_commits_output(input);
         assert_eq!(commits.len(), 2);
     }
@@ -1043,12 +1105,92 @@ mod tests {
 
     #[test]
     fn upstream_name_normal() {
-        assert_eq!(parse_upstream_name("origin/main"), Some("origin/main".to_string()));
+        assert_eq!(
+            parse_upstream_name("origin/main"),
+            Some("origin/main".to_string())
+        );
     }
 
     #[test]
     fn upstream_name_empty() {
         assert_eq!(parse_upstream_name(""), None);
         assert_eq!(parse_upstream_name("  "), None);
+    }
+
+    #[test]
+    fn split_batch_sections_complete() {
+        let stdout = [
+            "main",
+            " M src/lib.rs",
+            "origin/main",
+            "1\t2",
+            "abc\x1fmsg\x1fauthor\x1f1 day ago",
+            "* main [ahead 1]",
+            "origin/main",
+            "v1.0.0\x1fabc\x1f1 day ago",
+        ]
+        .join(ssh::BATCH_DELIM);
+
+        let sections = split_batch_sections(&stdout, 8).unwrap();
+        assert_eq!(sections.len(), 8);
+        assert_eq!(sections[0], "main");
+        assert_eq!(sections[1], " M src/lib.rs");
+        assert_eq!(sections[7], "v1.0.0\x1fabc\x1f1 day ago");
+    }
+
+    #[test]
+    fn split_batch_sections_preserves_first_line_leading_spaces() {
+        let stdout = [
+            "main",
+            " M models/spectrogram/checkpoint_epoch_005.pt",
+            "origin/main",
+            "0\t0",
+            "",
+            "  aaa-feature\n* main",
+            "origin/main",
+            "",
+        ]
+        .join(ssh::BATCH_DELIM);
+
+        let sections = split_batch_sections(&stdout, 8).unwrap();
+        assert_eq!(sections[1], " M models/spectrogram/checkpoint_epoch_005.pt");
+        assert_eq!(sections[5], "  aaa-feature\n* main");
+    }
+
+    #[test]
+    fn split_batch_sections_incomplete_is_error() {
+        let err = split_batch_sections("main", 8).unwrap_err().to_string();
+        assert!(err.contains("expected 8"));
+    }
+
+    #[test]
+    fn parse_refresh_git_ssh_stdout_maps_sections() {
+        let stdout = [
+            "main",
+            " M models/spectrogram/checkpoint_epoch_005.pt",
+            "origin/main",
+            "3\t5",
+            "abc123\x1fFix bug\x1fJane\x1f2 hours ago",
+            "  aaa-feature\n* main [ahead 3, behind 5]",
+            "origin/main",
+            "v1.0.0\x1fabc123\x1f2 hours ago",
+        ]
+        .join(ssh::BATCH_DELIM);
+
+        let git = parse_refresh_git_ssh_stdout(&stdout).unwrap();
+        assert_eq!(git.branch.as_deref(), Some("main"));
+        assert_eq!(git.changed.len(), 1);
+        assert_eq!(
+            git.changed[0].path,
+            "models/spectrogram/checkpoint_epoch_005.pt"
+        );
+        assert_eq!(git.upstream.as_deref(), Some("origin/main"));
+        assert_eq!(git.ahead, Some(3));
+        assert_eq!(git.behind, Some(5));
+        assert_eq!(git.recent_commits.len(), 1);
+        assert_eq!(git.local_branches.len(), 2);
+        assert!(git.local_branches.iter().any(|b| b.name == "aaa-feature"));
+        assert_eq!(git.remote_branches.len(), 1);
+        assert_eq!(git.tags.len(), 1);
     }
 }

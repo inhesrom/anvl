@@ -3,9 +3,7 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-use anvl_core::workspace::git::{
-    commit, diff_file, refresh_git, stage_file, unstage_file,
-};
+use anvl_core::workspace::git::{commit, diff_file, refresh_git, stage_file, unstage_file};
 
 // ---------------------------------------------------------------------------
 // Helper: initialise a throwaway git repo inside a TempDir
@@ -163,8 +161,14 @@ async fn stage_and_unstage_file() {
     let f = &state.changed[0];
     assert_eq!(f.path, "a.txt");
     // After unstaging the index_status should be clean (' ') and the worktree dirty.
-    assert_eq!(f.index_status, ' ', "expected ' ' index_status after unstage");
-    assert_eq!(f.worktree_status, 'M', "expected 'M' worktree_status after unstage");
+    assert_eq!(
+        f.index_status, ' ',
+        "expected ' ' index_status after unstage"
+    );
+    assert_eq!(
+        f.worktree_status, 'M',
+        "expected 'M' worktree_status after unstage"
+    );
 }
 
 #[tokio::test]
@@ -183,9 +187,15 @@ async fn stage_and_commit_clears_changes() {
     commit(dir, "second commit", None).await.unwrap();
 
     let state = refresh_git(dir, None).await.unwrap();
-    assert!(state.changed.is_empty(), "expected no changed files after commit");
     assert!(
-        state.recent_commits.iter().any(|c| c.message == "second commit"),
+        state.changed.is_empty(),
+        "expected no changed files after commit"
+    );
+    assert!(
+        state
+            .recent_commits
+            .iter()
+            .any(|c| c.message == "second commit"),
         "expected 'second commit' in recent_commits: {:?}",
         state.recent_commits
     );

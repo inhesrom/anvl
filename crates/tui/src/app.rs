@@ -3,7 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use protocol::{AttentionLevel, BranchInfo, GitState, RemoteBranchInfo, Route, TerminalKind, WorkspaceId, WorkspaceSummary};
+use protocol::{
+    AttentionLevel, BranchInfo, GitState, RemoteBranchInfo, Route, TerminalKind, WorkspaceId,
+    WorkspaceSummary,
+};
 use ratatui::{
     style::{Color as TuiColor, Modifier, Style},
     text::{Line, Span},
@@ -213,9 +216,15 @@ impl MouseSelection {
     /// Returns ((start_col, start_row), (end_col, end_row)) ordered by position.
     pub fn ordered(&self) -> ((u16, u16), (u16, u16)) {
         if (self.anchor_row, self.anchor_col) <= (self.end_row, self.end_col) {
-            ((self.anchor_col, self.anchor_row), (self.end_col, self.end_row))
+            (
+                (self.anchor_col, self.anchor_row),
+                (self.end_col, self.end_row),
+            )
         } else {
-            ((self.end_col, self.end_row), (self.anchor_col, self.anchor_row))
+            (
+                (self.end_col, self.end_row),
+                (self.anchor_col, self.anchor_row),
+            )
         }
     }
 
@@ -688,7 +697,10 @@ impl TuiApp {
         Some((name, trimmed))
     }
 
-    pub fn take_add_workspace_request_with_path(&mut self, path: String) -> Option<(String, String)> {
+    pub fn take_add_workspace_request_with_path(
+        &mut self,
+        path: String,
+    ) -> Option<(String, String)> {
         self.dir_browser.take()?;
         let trimmed = path.trim().to_string();
         if trimmed.is_empty() {
@@ -810,13 +822,29 @@ impl TuiApp {
                 if cell.inverse() {
                     // When colors are Reset (terminal default), we must use explicit
                     // colors so that swapping them produces a visible inversion.
-                    let inv_fg = if bg == TuiColor::Reset { TuiColor::Black } else { bg };
-                    let inv_bg = if fg == TuiColor::Reset { TuiColor::White } else { fg };
+                    let inv_fg = if bg == TuiColor::Reset {
+                        TuiColor::Black
+                    } else {
+                        bg
+                    };
+                    let inv_bg = if fg == TuiColor::Reset {
+                        TuiColor::White
+                    } else {
+                        fg
+                    };
                     style = style.fg(inv_fg).bg(inv_bg);
                 }
                 if show_cursor && r == cursor_row && c == cursor_col {
-                    let cur_fg = if fg == TuiColor::Reset { TuiColor::Black } else { bg };
-                    let cur_bg = if fg == TuiColor::Reset { TuiColor::White } else { fg };
+                    let cur_fg = if fg == TuiColor::Reset {
+                        TuiColor::Black
+                    } else {
+                        bg
+                    };
+                    let cur_bg = if fg == TuiColor::Reset {
+                        TuiColor::White
+                    } else {
+                        fg
+                    };
                     style = style.fg(cur_fg).bg(cur_bg);
                 }
                 let text = if cell.has_contents() {
@@ -926,7 +954,11 @@ impl TuiApp {
         offset -= file_count;
 
         // Commits with optional expanded file lists
-        let tag_map = if self.ws_tag_filter { Some(self.tag_map()) } else { None };
+        let tag_map = if self.ws_tag_filter {
+            Some(self.tag_map())
+        } else {
+            None
+        };
         for i in 0..git.recent_commits.len() {
             if let Some(ref tm) = tag_map {
                 if !tm.contains_key(&git.recent_commits[i].hash) {
@@ -1111,8 +1143,12 @@ impl TuiApp {
     }
 
     pub fn move_branch_selection(&mut self, delta: isize) {
-        let Some(id) = self.active_workspace_id() else { return };
-        let Some(git) = self.workspace_git.get(&id) else { return };
+        let Some(id) = self.active_workspace_id() else {
+            return;
+        };
+        let Some(git) = self.workspace_git.get(&id) else {
+            return;
+        };
         match self.ws_branch_sub_pane {
             BranchSubPane::Local => {
                 if git.local_branches.is_empty() {
@@ -1152,7 +1188,9 @@ impl TuiApp {
     }
 
     fn clamp_selected_branches(&mut self) {
-        let Some(id) = self.active_workspace_id() else { return };
+        let Some(id) = self.active_workspace_id() else {
+            return;
+        };
         if let Some(git) = self.workspace_git.get(&id) {
             if git.local_branches.is_empty() {
                 self.ws_selected_local_branch = 0;
@@ -1581,7 +1619,10 @@ fn save_ssh_history(history: &[SshHistoryEntry]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use protocol::{AttentionLevel, GitState, WorkspaceSummary, CommitInfo, ChangedFile, BranchInfo, RemoteBranchInfo};
+    use protocol::{
+        AttentionLevel, BranchInfo, ChangedFile, CommitInfo, GitState, RemoteBranchInfo,
+        WorkspaceSummary,
+    };
     use uuid::Uuid;
 
     fn make_ws(name: &str) -> WorkspaceSummary {
@@ -1608,20 +1649,48 @@ mod tests {
             ahead: Some(0),
             behind: Some(0),
             changed: vec![
-                ChangedFile { path: "a.rs".into(), index_status: 'M', worktree_status: ' ' },
-                ChangedFile { path: "b.rs".into(), index_status: '?', worktree_status: '?' },
+                ChangedFile {
+                    path: "a.rs".into(),
+                    index_status: 'M',
+                    worktree_status: ' ',
+                },
+                ChangedFile {
+                    path: "b.rs".into(),
+                    index_status: '?',
+                    worktree_status: '?',
+                },
             ],
             recent_commits: vec![
-                CommitInfo { hash: "abc".into(), message: "first".into(), author: "dev".into(), date: "1h".into() },
-                CommitInfo { hash: "def".into(), message: "second".into(), author: "dev".into(), date: "2h".into() },
+                CommitInfo {
+                    hash: "abc".into(),
+                    message: "first".into(),
+                    author: "dev".into(),
+                    date: "1h".into(),
+                },
+                CommitInfo {
+                    hash: "def".into(),
+                    message: "second".into(),
+                    author: "dev".into(),
+                    date: "2h".into(),
+                },
             ],
             local_branches: vec![
-                BranchInfo { name: "main".into(), is_head: true, ahead: None, behind: None },
-                BranchInfo { name: "dev".into(), is_head: false, ahead: Some(1), behind: None },
+                BranchInfo {
+                    name: "main".into(),
+                    is_head: true,
+                    ahead: None,
+                    behind: None,
+                },
+                BranchInfo {
+                    name: "dev".into(),
+                    is_head: false,
+                    ahead: Some(1),
+                    behind: None,
+                },
             ],
-            remote_branches: vec![
-                RemoteBranchInfo { full_name: "origin/main".into() },
-            ],
+            remote_branches: vec![RemoteBranchInfo {
+                full_name: "origin/main".into(),
+            }],
             tags: vec![],
         }
     }
@@ -1733,7 +1802,12 @@ mod tests {
     fn cannot_close_last_tab() {
         let mut app = TuiApp::default();
         // Remove all shell tabs, keep only agent
-        app.ws_tabs = vec![TerminalTab { id: "agent".into(), label: "agent".into(), kind: TerminalKind::Agent, passthrough: false }];
+        app.ws_tabs = vec![TerminalTab {
+            id: "agent".into(),
+            label: "agent".into(),
+            kind: TerminalKind::Agent,
+            passthrough: false,
+        }];
         app.ws_active_tab = 0;
         assert!(!app.can_close_active_tab());
     }
@@ -1904,7 +1978,11 @@ mod tests {
     #[test]
     fn ssh_workspace_flow_with_history() {
         let mut app = TuiApp::default();
-        app.ssh_history = vec![SshHistoryEntry { host: "h".into(), user: None, path: "/p".into() }];
+        app.ssh_history = vec![SshHistoryEntry {
+            host: "h".into(),
+            user: None,
+            path: "/p".into(),
+        }];
         app.begin_add_ssh_workspace();
         assert!(app.ssh_history_picker.is_some());
         app.select_ssh_history_entry();
@@ -1964,7 +2042,12 @@ mod tests {
 
     #[test]
     fn mouse_selection_ordered_forward() {
-        let sel = MouseSelection { anchor_col: 0, anchor_row: 0, end_col: 5, end_row: 3 };
+        let sel = MouseSelection {
+            anchor_col: 0,
+            anchor_row: 0,
+            end_col: 5,
+            end_row: 3,
+        };
         let ((sc, sr), (ec, er)) = sel.ordered();
         assert_eq!((sc, sr), (0, 0));
         assert_eq!((ec, er), (5, 3));
@@ -1972,7 +2055,12 @@ mod tests {
 
     #[test]
     fn mouse_selection_ordered_backward() {
-        let sel = MouseSelection { anchor_col: 5, anchor_row: 3, end_col: 0, end_row: 0 };
+        let sel = MouseSelection {
+            anchor_col: 5,
+            anchor_row: 3,
+            end_col: 0,
+            end_row: 0,
+        };
         let ((sc, sr), (ec, er)) = sel.ordered();
         assert_eq!((sc, sr), (0, 0));
         assert_eq!((ec, er), (5, 3));
@@ -2013,14 +2101,20 @@ mod tests {
     #[test]
     fn effective_attention_with_notifications_on() {
         let app = TuiApp::default();
-        assert_eq!(app.effective_attention(AttentionLevel::Error), AttentionLevel::Error);
+        assert_eq!(
+            app.effective_attention(AttentionLevel::Error),
+            AttentionLevel::Error
+        );
     }
 
     #[test]
     fn effective_attention_with_notifications_off() {
         let mut app = TuiApp::default();
         app.settings.attention_notifications = false;
-        assert_eq!(app.effective_attention(AttentionLevel::Error), AttentionLevel::None);
+        assert_eq!(
+            app.effective_attention(AttentionLevel::Error),
+            AttentionLevel::None
+        );
     }
 
     #[test]
@@ -2296,9 +2390,21 @@ mod tests {
         app.open_workspace(id);
         let mut git = make_git_state();
         git.tags = vec![
-            protocol::TagInfo { name: "v1.0".into(), hash: "abc".into(), date: "1d".into() },
-            protocol::TagInfo { name: "v1.1".into(), hash: "abc".into(), date: "2d".into() },
-            protocol::TagInfo { name: "v2.0".into(), hash: "def".into(), date: "3d".into() },
+            protocol::TagInfo {
+                name: "v1.0".into(),
+                hash: "abc".into(),
+                date: "1d".into(),
+            },
+            protocol::TagInfo {
+                name: "v1.1".into(),
+                hash: "abc".into(),
+                date: "2d".into(),
+            },
+            protocol::TagInfo {
+                name: "v2.0".into(),
+                hash: "def".into(),
+                date: "3d".into(),
+            },
         ];
         app.set_workspace_git(id, git);
         let map = app.tag_map();
@@ -2318,9 +2424,11 @@ mod tests {
         app.open_workspace(id);
         let mut git = make_git_state();
         // Tag only first commit ("abc"), second ("def") is untagged
-        git.tags = vec![
-            protocol::TagInfo { name: "v1.0".into(), hash: "abc".into(), date: "1d".into() },
-        ];
+        git.tags = vec![protocol::TagInfo {
+            name: "v1.0".into(),
+            hash: "abc".into(),
+            date: "1d".into(),
+        }];
         app.set_workspace_git(id, git);
         app.ws_tag_filter = true;
         // header(1) + 1 tagged commit = 2
@@ -2333,13 +2441,16 @@ mod tests {
         let id = app.workspaces[0].id;
         app.open_workspace(id);
         let mut git = make_git_state();
-        git.tags = vec![
-            protocol::TagInfo { name: "v1.0".into(), hash: "abc".into(), date: "1d".into() },
-        ];
+        git.tags = vec![protocol::TagInfo {
+            name: "v1.0".into(),
+            hash: "abc".into(),
+            date: "1d".into(),
+        }];
         app.set_workspace_git(id, git);
         app.ws_tag_filter = true;
         app.ws_expanded_commit = Some(0); // expand commit index 0 ("abc")
-        app.commit_files_cache.insert("abc".into(), vec!["file1.rs".into(), "file2.rs".into()]);
+        app.commit_files_cache
+            .insert("abc".into(), vec!["file1.rs".into(), "file2.rs".into()]);
         // header(1) + 1 tagged commit + 2 expanded files = 4
         assert_eq!(app.total_log_items(), 4);
     }
@@ -2351,9 +2462,11 @@ mod tests {
         app.open_workspace(id);
         let mut git = make_git_state();
         // Tag only the second commit ("def"), first ("abc") is untagged
-        git.tags = vec![
-            protocol::TagInfo { name: "v2.0".into(), hash: "def".into(), date: "2d".into() },
-        ];
+        git.tags = vec![protocol::TagInfo {
+            name: "v2.0".into(),
+            hash: "def".into(),
+            date: "2d".into(),
+        }];
         app.set_workspace_git(id, git);
         app.ws_tag_filter = true;
         // index 0 = header, index 1 = Commit(1) because Commit(0) is untagged and skipped
@@ -2390,7 +2503,10 @@ mod tests {
         app.open_workspace(id);
         app.set_workspace_git(id, make_git_state());
         app.ws_expanded_commit = Some(0);
-        app.commit_files_cache.insert("abc".into(), vec!["src/main.rs".into(), "Cargo.toml".into()]);
+        app.commit_files_cache.insert(
+            "abc".into(),
+            vec!["src/main.rs".into(), "Cargo.toml".into()],
+        );
         // With expanded commit 0: header(0), Commit(0)(1), CommitFile(0,0)(2), CommitFile(0,1)(3), Commit(1)(4)
         app.ws_selected_commit = 2; // CommitFile(0, 0)
         let result = app.selected_commit_file();

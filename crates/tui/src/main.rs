@@ -7,19 +7,19 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as OsCommand, Stdio};
 use std::time::{Duration, Instant};
 
+use anvl_core::{spawn_core, CoreHandle};
 use anyhow::{anyhow, Context, Result};
 use app::TuiApp;
 use base64::Engine as _;
 use crossterm::{
     event::{
-        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste,
-        EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
-        MouseEvent, MouseEventKind,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+        MouseEventKind,
     },
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
-use anvl_core::{spawn_core, CoreHandle};
 use protocol::{AttentionLevel, Command, Event as CoreEvent, Route, TerminalKind};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use serde::{Deserialize, Serialize};
@@ -211,10 +211,7 @@ async fn main() -> Result<()> {
         LaunchMode::CreateSession { name } => {
             let entry = ensure_session_running(&name).await?;
             if cli.detach {
-                println!(
-                    "session '{}' running in background (detached)",
-                    entry.name
-                );
+                println!("session '{}' running in background (detached)", entry.name);
                 return Ok(());
             }
             let backend = build_remote_backend(&entry.socket_path).await?;
@@ -235,10 +232,7 @@ async fn main() -> Result<()> {
                 entry
             };
             if cli.detach {
-                println!(
-                    "session '{}' is running (detached)",
-                    entry.name
-                );
+                println!("session '{}' is running (detached)", entry.name);
                 return Ok(());
             }
             let backend = build_remote_backend(&entry.socket_path).await?;
@@ -261,7 +255,10 @@ fn self_update() -> Result<()> {
 
     // Fetch latest release info from GitHub
     let api_output = OsCommand::new("curl")
-        .args(["-fsSL", "https://api.github.com/repos/inhesrom/anvl/releases/latest"])
+        .args([
+            "-fsSL",
+            "https://api.github.com/repos/inhesrom/anvl/releases/latest",
+        ])
         .output()
         .context("failed to run curl — is it installed?")?;
     if !api_output.status.success() {
@@ -314,9 +311,8 @@ fn self_update() -> Result<()> {
         _ => return Err(anyhow!("unsupported platform: {os_name} {arch_name}")),
     };
 
-    let url = format!(
-        "https://github.com/inhesrom/anvl/releases/download/{tag}/anvl-{target}.tar.gz"
-    );
+    let url =
+        format!("https://github.com/inhesrom/anvl/releases/download/{tag}/anvl-{target}.tar.gz");
 
     // Download to a temp directory
     let tmp_dir = std::env::temp_dir().join(format!("anvl-update-{}", std::process::id()));
@@ -346,7 +342,8 @@ fn self_update() -> Result<()> {
     }
 
     // Replace the current binary
-    let current_exe = std::env::current_exe().context("cannot determine current executable path")?;
+    let current_exe =
+        std::env::current_exe().context("cannot determine current executable path")?;
     let new_binary = tmp_dir.join("anvl");
     if !new_binary.exists() {
         return Err(anyhow!("extracted archive does not contain 'anvl' binary"));
@@ -360,12 +357,8 @@ fn self_update() -> Result<()> {
             current_exe.display()
         )
     })?;
-    std::fs::copy(&new_binary, &current_exe).with_context(|| {
-        format!(
-            "failed to install new binary at {}.",
-            current_exe.display()
-        )
-    })?;
+    std::fs::copy(&new_binary, &current_exe)
+        .with_context(|| format!("failed to install new binary at {}.", current_exe.display()))?;
 
     #[cfg(unix)]
     {
@@ -539,13 +532,7 @@ impl TerminalHistory {
         }
     }
 
-    fn append(
-        &mut self,
-        id: Uuid,
-        kind: protocol::TerminalKind,
-        tab_id: String,
-        raw_bytes: &[u8],
-    ) {
+    fn append(&mut self, id: Uuid, kind: protocol::TerminalKind, tab_id: String, raw_bytes: &[u8]) {
         let entry = self
             .buffers
             .entry((id, tab_id))
@@ -577,8 +564,7 @@ impl TerminalHistory {
                 kind: entry.kind,
                 tab_id: Some(tab_id.clone()),
             });
-            let data_b64 =
-                base64::engine::general_purpose::STANDARD.encode(&entry.data);
+            let data_b64 = base64::engine::general_purpose::STANDARD.encode(&entry.data);
             out.push(CoreEvent::TerminalOutput {
                 id: *id,
                 kind: entry.kind,
@@ -644,21 +630,16 @@ async fn run_daemon(name: &str) -> Result<()> {
                                 tab_id,
                                 data_b64,
                             } => {
-                                if let Ok(raw) = base64::engine::general_purpose::STANDARD
-                                    .decode(data_b64)
+                                if let Ok(raw) =
+                                    base64::engine::general_purpose::STANDARD.decode(data_b64)
                                 {
-                                    let tab = tab_id
-                                        .clone()
-                                        .unwrap_or_else(|| "default".to_string());
-                                    history.lock().await.terminals.append(
-                                        *id, *kind, tab, &raw,
-                                    );
+                                    let tab =
+                                        tab_id.clone().unwrap_or_else(|| "default".to_string());
+                                    history.lock().await.terminals.append(*id, *kind, tab, &raw);
                                 }
                             }
                             CoreEvent::TerminalStarted { id, tab_id, .. } => {
-                                let tab = tab_id
-                                    .clone()
-                                    .unwrap_or_else(|| "default".to_string());
+                                let tab = tab_id.clone().unwrap_or_else(|| "default".to_string());
                                 history.lock().await.terminals.reset(*id, tab);
                             }
                             CoreEvent::WorkspaceList { .. }
@@ -946,8 +927,7 @@ fn is_expected_daemon_process(entry: &SessionEntry) -> bool {
         return false;
     }
     let cmdline = String::from_utf8_lossy(&output.stdout);
-    cmdline.contains("--run-daemon")
-        && cmdline.contains(&format!("--session-name {}", entry.name))
+    cmdline.contains("--run-daemon") && cmdline.contains(&format!("--session-name {}", entry.name))
 }
 
 fn session_registry_path() -> Option<PathBuf> {
@@ -1058,7 +1038,11 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
         if let Route::Workspace { id } = app.route {
             if let Ok(size) = terminal.size() {
                 let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                let inner = ui::screens::workspace::terminal_content_rect(area, app.focus, app.terminal_fullscreen);
+                let inner = ui::screens::workspace::terminal_content_rect(
+                    area,
+                    app.focus,
+                    app.terminal_fullscreen,
+                );
                 let cols = inner.width.max(1);
                 let rows = inner.height.max(1);
                 let tid = app.active_tab_id();
@@ -1264,7 +1248,8 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                 }
                                 continue;
                             } else if app.is_adding_workspace() {
-                                let editing = app.dir_browser.as_ref().map_or(false, |b| b.editing_path);
+                                let editing =
+                                    app.dir_browser.as_ref().map_or(false, |b| b.editing_path);
                                 if editing {
                                     match key.code {
                                         KeyCode::Esc => app.cancel_add_workspace(),
@@ -1305,11 +1290,16 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                             }
                                         }
                                         KeyCode::Enter => {
-                                            if let Some((name, path)) = app.take_add_workspace_request()
+                                            if let Some((name, path)) =
+                                                app.take_add_workspace_request()
                                             {
                                                 let _ = backend
                                                     .cmd_tx
-                                                    .send(Command::AddWorkspace { name, path, ssh: None })
+                                                    .send(Command::AddWorkspace {
+                                                        name,
+                                                        path,
+                                                        ssh: None,
+                                                    })
                                                     .await;
                                             }
                                         }
@@ -1344,7 +1334,11 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                                 {
                                                     let _ = backend
                                                         .cmd_tx
-                                                        .send(Command::AddWorkspace { name, path, ssh: None })
+                                                        .send(Command::AddWorkspace {
+                                                            name,
+                                                            path,
+                                                            ssh: None,
+                                                        })
                                                         .await;
                                                 }
                                             }
@@ -1356,9 +1350,7 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                 match key.code {
                                     KeyCode::Esc => app.cancel_rename_workspace(),
                                     KeyCode::Enter => {
-                                        if let Some((id, name)) =
-                                            app.take_rename_request_home()
-                                        {
+                                        if let Some((id, name)) = app.take_rename_request_home() {
                                             let _ = backend
                                                 .cmd_tx
                                                 .send(Command::RenameWorkspace { id, name })
@@ -1404,7 +1396,9 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     KeyCode::Down | KeyCode::Char('j') => {
                                         app.move_home_selection(0, 1)
                                     }
-                                    KeyCode::Up | KeyCode::Char('k') => app.move_home_selection(0, -1),
+                                    KeyCode::Up | KeyCode::Char('k') => {
+                                        app.move_home_selection(0, -1)
+                                    }
                                     KeyCode::Left | KeyCode::Char('h') => {
                                         app.move_home_selection(-1, 0)
                                     }
@@ -1503,7 +1497,9 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
 
                             if app.is_creating_branch() {
                                 match key.code {
-                                    KeyCode::Esc => { app.cancel_create_branch(); }
+                                    KeyCode::Esc => {
+                                        app.cancel_create_branch();
+                                    }
                                     KeyCode::Enter => {
                                         if let Some(name) = app.create_branch_input.take() {
                                             let trimmed = name.trim().to_string();
@@ -1536,7 +1532,9 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
 
                             if app.is_committing() {
                                 match key.code {
-                                    KeyCode::Esc => { app.commit_input = None; }
+                                    KeyCode::Esc => {
+                                        app.commit_input = None;
+                                    }
                                     KeyCode::Enter => {
                                         if let Some(msg) = app.commit_input.take() {
                                             let trimmed = msg.trim().to_string();
@@ -1605,10 +1603,16 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
 
                             if app.is_stashing() {
                                 match key.code {
-                                    KeyCode::Esc => { app.stash_input = None; }
+                                    KeyCode::Esc => {
+                                        app.stash_input = None;
+                                    }
                                     KeyCode::Enter => {
                                         if let Some(msg) = app.stash_input.take() {
-                                            let message = if msg.trim().is_empty() { None } else { Some(msg) };
+                                            let message = if msg.trim().is_empty() {
+                                                None
+                                            } else {
+                                                Some(msg)
+                                            };
                                             let _ = backend
                                                 .cmd_tx
                                                 .send(Command::GitStash { id, message })
@@ -1698,7 +1702,8 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     if matches!(app.focus, app::Focus::WsLog) {
                                         match app.log_item_at(app.ws_selected_commit) {
                                             app::LogItem::UncommittedHeader => {
-                                                app.ws_uncommitted_expanded = !app.ws_uncommitted_expanded;
+                                                app.ws_uncommitted_expanded =
+                                                    !app.ws_uncommitted_expanded;
                                             }
                                             app::LogItem::ChangedFile(_) => {
                                                 if let Some(file) = app.selected_log_file() {
@@ -1714,20 +1719,32 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                                 } else {
                                                     app.ws_expanded_commit = Some(ci);
                                                     if let Some(hash) = app.selected_commit_hash() {
-                                                        if !app.commit_files_cache.contains_key(&hash) {
+                                                        if !app
+                                                            .commit_files_cache
+                                                            .contains_key(&hash)
+                                                        {
                                                             let _ = backend
                                                                 .cmd_tx
-                                                                .send(Command::LoadCommitFiles { id, hash })
+                                                                .send(Command::LoadCommitFiles {
+                                                                    id,
+                                                                    hash,
+                                                                })
                                                                 .await;
                                                         }
                                                     }
                                                 }
                                             }
                                             app::LogItem::CommitFile(_, _) => {
-                                                if let Some((hash, file)) = app.selected_commit_file() {
+                                                if let Some((hash, file)) =
+                                                    app.selected_commit_file()
+                                                {
                                                     let _ = backend
                                                         .cmd_tx
-                                                        .send(Command::LoadCommitFileDiff { id, hash, file })
+                                                        .send(Command::LoadCommitFileDiff {
+                                                            id,
+                                                            hash,
+                                                            file,
+                                                        })
                                                         .await;
                                                 }
                                             }
@@ -1755,10 +1772,16 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                                 .cmd_tx
                                                 .send(Command::LoadDiff { id, file })
                                                 .await;
-                                        } else if let Some((hash, file)) = app.selected_commit_file() {
+                                        } else if let Some((hash, file)) =
+                                            app.selected_commit_file()
+                                        {
                                             let _ = backend
                                                 .cmd_tx
-                                                .send(Command::LoadCommitFileDiff { id, hash, file })
+                                                .send(Command::LoadCommitFileDiff {
+                                                    id,
+                                                    hash,
+                                                    file,
+                                                })
                                                 .await;
                                         }
                                     }
@@ -1778,10 +1801,16 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                                 .cmd_tx
                                                 .send(Command::LoadDiff { id, file })
                                                 .await;
-                                        } else if let Some((hash, file)) = app.selected_commit_file() {
+                                        } else if let Some((hash, file)) =
+                                            app.selected_commit_file()
+                                        {
                                             let _ = backend
                                                 .cmd_tx
-                                                .send(Command::LoadCommitFileDiff { id, hash, file })
+                                                .send(Command::LoadCommitFileDiff {
+                                                    id,
+                                                    hash,
+                                                    file,
+                                                })
                                                 .await;
                                         }
                                     }
@@ -1795,14 +1824,20 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                 },
                                 KeyCode::Char(' ')
                                     if matches!(app.focus, app::Focus::WsLog)
-                                        && matches!(app.log_item_at(app.ws_selected_commit), app::LogItem::ChangedFile(_)) =>
+                                        && matches!(
+                                            app.log_item_at(app.ws_selected_commit),
+                                            app::LogItem::ChangedFile(_)
+                                        ) =>
                                 {
                                     // Toggle stage/unstage selected file
-                                    if let app::LogItem::ChangedFile(fi) = app.log_item_at(app.ws_selected_commit) {
+                                    if let app::LogItem::ChangedFile(fi) =
+                                        app.log_item_at(app.ws_selected_commit)
+                                    {
                                         if let Some(git) = app.workspace_git.get(&id) {
                                             if let Some(f) = git.changed.get(fi) {
                                                 let file = f.path.clone();
-                                                let is_staged = f.index_status != ' ' && f.index_status != '?';
+                                                let is_staged =
+                                                    f.index_status != ' ' && f.index_status != '?';
                                                 let cmd = if is_staged {
                                                     Command::GitUnstageFile { id, file }
                                                 } else {
@@ -1817,19 +1852,14 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     if matches!(app.focus, app::Focus::WsLog)
                                         && app.log_item_is_file_context() =>
                                 {
-                                    let _ = backend
-                                        .cmd_tx
-                                        .send(Command::GitStageAll { id })
-                                        .await;
+                                    let _ = backend.cmd_tx.send(Command::GitStageAll { id }).await;
                                 }
                                 KeyCode::Char('-')
                                     if matches!(app.focus, app::Focus::WsLog)
                                         && app.log_item_is_file_context() =>
                                 {
-                                    let _ = backend
-                                        .cmd_tx
-                                        .send(Command::GitUnstageAll { id })
-                                        .await;
+                                    let _ =
+                                        backend.cmd_tx.send(Command::GitUnstageAll { id }).await;
                                 }
                                 KeyCode::Char('c')
                                     if matches!(app.focus, app::Focus::WsLog)
@@ -1839,7 +1869,10 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                 }
                                 KeyCode::Char('d')
                                     if matches!(app.focus, app::Focus::WsLog)
-                                        && matches!(app.log_item_at(app.ws_selected_commit), app::LogItem::ChangedFile(_)) =>
+                                        && matches!(
+                                            app.log_item_at(app.ws_selected_commit),
+                                            app::LogItem::ChangedFile(_)
+                                        ) =>
                                 {
                                     app.begin_discard();
                                 }
@@ -1849,11 +1882,11 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                 {
                                     app.stash_input = Some(String::new());
                                 }
-                                KeyCode::Char('t')
-                                    if matches!(app.focus, app::Focus::WsLog) =>
-                                {
+                                KeyCode::Char('t') if matches!(app.focus, app::Focus::WsLog) => {
                                     app.ws_tag_filter = !app.ws_tag_filter;
-                                    app.ws_selected_commit = app.ws_selected_commit.min(app.total_log_items().saturating_sub(1));
+                                    app.ws_selected_commit = app
+                                        .ws_selected_commit
+                                        .min(app.total_log_items().saturating_sub(1));
                                 }
                                 KeyCode::Char('c')
                                     if matches!(app.focus, app::Focus::WsBranches) =>
@@ -1893,10 +1926,12 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                         app::BranchSubPane::Remote => {
                                             if let Some(rb) = app.selected_remote_branch() {
                                                 let full = rb.full_name.clone();
-                                                if let Some(local_name) = full.splitn(2, '/').nth(1) {
+                                                if let Some(local_name) = full.splitn(2, '/').nth(1)
+                                                {
                                                     let local_name = local_name.to_string();
                                                     app.ws_pending_select_head_branch = true;
-                                                    app.ws_branch_sub_pane = app::BranchSubPane::Local;
+                                                    app.ws_branch_sub_pane =
+                                                        app::BranchSubPane::Local;
                                                     let _ = backend
                                                         .cmd_tx
                                                         .send(Command::GitCheckoutRemoteBranch {
@@ -2137,7 +2172,9 @@ fn apply_event(app: &mut TuiApp, evt: CoreEvent) {
                 ws.attention = level;
             }
         }
-        _ => {}
+        CoreEvent::Error { message } => {
+            app.git_action_message = Some((message, Instant::now()));
+        }
     }
 }
 
@@ -2379,7 +2416,9 @@ async fn handle_mouse(
                             if let Some(file) = app.selected_log_file() {
                                 let _ = cmd_tx.send(Command::LoadDiff { id, file }).await;
                             } else if let Some((hash, file)) = app.selected_commit_file() {
-                                let _ = cmd_tx.send(Command::LoadCommitFileDiff { id, hash, file }).await;
+                                let _ = cmd_tx
+                                    .send(Command::LoadCommitFileDiff { id, hash, file })
+                                    .await;
                             }
                         }
                         ui::screens::workspace::WorkspaceHit::BranchesPane(idx) => {
@@ -2451,7 +2490,10 @@ async fn forward_mouse_to_terminal(
     };
 
     let hit = ui::screens::workspace::hit_test(area, app, mouse.column, mouse.row);
-    if !matches!(hit, Some(ui::screens::workspace::WorkspaceHit::TerminalPane)) {
+    if !matches!(
+        hit,
+        Some(ui::screens::workspace::WorkspaceHit::TerminalPane)
+    ) {
         return false;
     }
 
@@ -2540,7 +2582,10 @@ fn encode_terminal_mouse(
             }
         }
         MouseEventKind::Drag(button) => {
-            if !matches!(mode, MouseProtocolMode::ButtonMotion | MouseProtocolMode::AnyMotion) {
+            if !matches!(
+                mode,
+                MouseProtocolMode::ButtonMotion | MouseProtocolMode::AnyMotion
+            ) {
                 return None;
             }
             MouseReport {
@@ -2557,10 +2602,22 @@ fn encode_terminal_mouse(
                 release: false,
             }
         }
-        MouseEventKind::ScrollUp => MouseReport { cb: 64 | modifiers, release: false },
-        MouseEventKind::ScrollDown => MouseReport { cb: 65 | modifiers, release: false },
-        MouseEventKind::ScrollLeft => MouseReport { cb: 66 | modifiers, release: false },
-        MouseEventKind::ScrollRight => MouseReport { cb: 67 | modifiers, release: false },
+        MouseEventKind::ScrollUp => MouseReport {
+            cb: 64 | modifiers,
+            release: false,
+        },
+        MouseEventKind::ScrollDown => MouseReport {
+            cb: 65 | modifiers,
+            release: false,
+        },
+        MouseEventKind::ScrollLeft => MouseReport {
+            cb: 66 | modifiers,
+            release: false,
+        },
+        MouseEventKind::ScrollRight => MouseReport {
+            cb: 67 | modifiers,
+            release: false,
+        },
     };
 
     encode_mouse_report(report, col, row, encoding)
@@ -2581,9 +2638,15 @@ fn encode_mouse_button(button: MouseButton) -> Option<u16> {
 
 fn encode_mouse_modifiers(modifiers: KeyModifiers) -> u16 {
     let mut bits = 0;
-    if modifiers.contains(KeyModifiers::SHIFT) { bits |= 4; }
-    if modifiers.contains(KeyModifiers::ALT) { bits |= 8; }
-    if modifiers.contains(KeyModifiers::CONTROL) { bits |= 16; }
+    if modifiers.contains(KeyModifiers::SHIFT) {
+        bits |= 4;
+    }
+    if modifiers.contains(KeyModifiers::ALT) {
+        bits |= 8;
+    }
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        bits |= 16;
+    }
     bits
 }
 
@@ -2597,7 +2660,9 @@ fn encode_mouse_report(
         MouseProtocolEncoding::Sgr => Some(
             format!(
                 "\x1b[<{};{};{}{}",
-                report.cb, col, row,
+                report.cb,
+                col,
+                row,
                 if report.release { 'm' } else { 'M' }
             )
             .into_bytes(),

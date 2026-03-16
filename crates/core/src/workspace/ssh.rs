@@ -9,13 +9,9 @@ use tokio::process::Command;
 /// Builds a `Command` that either runs locally or tunnels through SSH.
 ///
 /// For local execution (`ssh == None`), returns `Command::new(program)` with `current_dir(cwd)`.
-/// For SSH execution, returns `ssh` with ControlMaster args that runs `cd <cwd> && <program> <args>`.
-pub fn build_command(
-    ssh: Option<&SshTarget>,
-    cwd: &Path,
-    program: &str,
-    args: &[&str],
-) -> Command {
+/// For SSH execution, returns `ssh` with ControlMaster args that runs the command
+/// through the remote login shell when available, with sane shell fallbacks.
+pub fn build_command(ssh: Option<&SshTarget>, cwd: &Path, program: &str, args: &[&str]) -> Command {
     match ssh {
         None => {
             let mut cmd = Command::new(program);
@@ -23,20 +19,11 @@ pub fn build_command(
             cmd
         }
         Some(target) => {
-            let mut cmd = Command::new("ssh");
+            let mut cmd = Command::new(ssh_program());
             append_ssh_args(&mut cmd, target);
+            cmd.arg("-o").arg("BatchMode=yes");
             cmd.arg(ssh_destination(target));
-
-            let remote_cmd = format!(
-                "cd {} && {} {}",
-                shell_quote(&cwd.display().to_string()),
-                shell_quote(program),
-                args.iter()
-                    .map(|a| shell_quote(a))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-            cmd.arg(remote_cmd);
+            cmd.arg(remote_command(cwd, program, args));
             cmd
         }
     }
@@ -44,15 +31,15 @@ pub fn build_command(
 
 /// Validates SSH connectivity and that the remote path exists.
 pub async fn validate_ssh_connection(target: &SshTarget, path: &Path) -> Result<()> {
-    let mut cmd = Command::new("ssh");
+    let mut cmd = Command::new(ssh_program());
     append_ssh_args(&mut cmd, target);
     cmd.arg("-o").arg("BatchMode=yes");
     cmd.arg("-o").arg("ConnectTimeout=5");
     cmd.arg(ssh_destination(target));
-    cmd.arg(format!(
+    cmd.arg(wrap_login_shell_script(&format!(
         "test -d {}",
         shell_quote(&path.display().to_string())
-    ));
+    )));
 
     let out = cmd.output().await?;
     if !out.status.success() {
@@ -113,22 +100,23 @@ pub fn build_batch_command(target: &SshTarget, cwd: &Path, commands: &[String]) 
         .collect::<Vec<_>>()
         .join(&format!(" ; echo '{}' ; ", BATCH_DELIM));
 
-    let remote_cmd = format!(
+    let script = format!(
         "cd {} && {{ {}; }}",
         shell_quote(&cwd.display().to_string()),
         joined
     );
 
-    let mut cmd = Command::new("ssh");
+    let mut cmd = Command::new(ssh_program());
     append_ssh_args(&mut cmd, target);
+    cmd.arg("-o").arg("BatchMode=yes");
     cmd.arg(ssh_destination(target));
-    cmd.arg(remote_cmd);
+    cmd.arg(wrap_login_shell_script(&script));
     cmd
 }
 
 /// Builds SSH args as a Vec<String> for use with CommandBuilder (terminals).
 pub fn ssh_args_for_terminal(target: &SshTarget, cwd: &Path) -> Vec<String> {
-    let mut args = vec!["ssh".to_string(), "-t".to_string()];
+    let mut args = vec![ssh_program(), "-t".to_string()];
     if let Some(port) = target.port {
         args.push("-p".to_string());
         args.push(port.to_string());
@@ -141,11 +129,50 @@ pub fn ssh_args_for_terminal(target: &SshTarget, cwd: &Path) -> Vec<String> {
     args.push("-o".to_string());
     args.push("ControlPersist=600".to_string());
     args.push(ssh_destination(target));
-    args.push(format!(
-        "cd {} && exec $SHELL -l",
-        shell_quote(&cwd.display().to_string())
-    ));
+    args.push(remote_terminal_shell_command(cwd));
     args
+}
+
+fn ssh_program() -> String {
+    std::env::var("ANVL_SSH_BIN").unwrap_or_else(|_| "ssh".to_string())
+}
+
+fn remote_command(cwd: &Path, program: &str, args: &[&str]) -> String {
+    let script = format!(
+        "cd {} && {}",
+        shell_quote(&cwd.display().to_string()),
+        shell_words(program, args)
+    );
+    wrap_login_shell_script(&script)
+}
+
+fn shell_words(program: &str, args: &[&str]) -> String {
+    std::iter::once(shell_quote(program))
+        .chain(args.iter().map(|arg| shell_quote(arg)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn wrap_login_shell_script(script: &str) -> String {
+    let quoted = shell_quote(script);
+    format!(
+        "if [ -n \"${{SHELL:-}}\" ]; then exec \"$SHELL\" -lc {quoted}; \
+elif command -v bash >/dev/null 2>&1; then exec bash -lc {quoted}; \
+elif command -v zsh >/dev/null 2>&1; then exec zsh -lc {quoted}; \
+elif command -v fish >/dev/null 2>&1; then exec fish -lc {quoted}; \
+else exec sh -c {quoted}; fi"
+    )
+}
+
+fn remote_terminal_shell_command(cwd: &Path) -> String {
+    format!(
+        "cd {} && if [ -n \"${{SHELL:-}}\" ]; then exec \"$SHELL\" -l; \
+elif command -v bash >/dev/null 2>&1; then exec bash -l; \
+elif command -v zsh >/dev/null 2>&1; then exec zsh -l; \
+elif command -v fish >/dev/null 2>&1; then exec fish -l; \
+else exec sh; fi",
+        shell_quote(&cwd.display().to_string())
+    )
 }
 
 #[cfg(test)]
@@ -176,54 +203,128 @@ mod tests {
 
     #[test]
     fn ssh_destination_with_user() {
-        let target = SshTarget { host: "example.com".into(), user: Some("admin".into()), port: None };
+        let target = SshTarget {
+            host: "example.com".into(),
+            user: Some("admin".into()),
+            port: None,
+        };
         assert_eq!(ssh_destination(&target), "admin@example.com");
     }
 
     #[test]
     fn ssh_destination_without_user() {
-        let target = SshTarget { host: "example.com".into(), user: None, port: None };
+        let target = SshTarget {
+            host: "example.com".into(),
+            user: None,
+            port: None,
+        };
         assert_eq!(ssh_destination(&target), "example.com");
     }
 
     #[test]
     fn control_socket_deterministic() {
-        let t1 = SshTarget { host: "h".into(), user: Some("u".into()), port: Some(22) };
-        let t2 = SshTarget { host: "h".into(), user: Some("u".into()), port: Some(22) };
+        let t1 = SshTarget {
+            host: "h".into(),
+            user: Some("u".into()),
+            port: Some(22),
+        };
+        let t2 = SshTarget {
+            host: "h".into(),
+            user: Some("u".into()),
+            port: Some(22),
+        };
         assert_eq!(control_socket_path(&t1), control_socket_path(&t2));
     }
 
     #[test]
     fn control_socket_different_targets() {
-        let t1 = SshTarget { host: "host1".into(), user: None, port: None };
-        let t2 = SshTarget { host: "host2".into(), user: None, port: None };
+        let t1 = SshTarget {
+            host: "host1".into(),
+            user: None,
+            port: None,
+        };
+        let t2 = SshTarget {
+            host: "host2".into(),
+            user: None,
+            port: None,
+        };
         assert_ne!(control_socket_path(&t1), control_socket_path(&t2));
     }
 
     #[test]
     fn control_socket_starts_with_expected_prefix() {
-        let t = SshTarget { host: "h".into(), user: None, port: None };
+        let t = SshTarget {
+            host: "h".into(),
+            user: None,
+            port: None,
+        };
         assert!(control_socket_path(&t).starts_with("/tmp/anvl-ssh-"));
     }
 
     #[test]
     fn ssh_args_for_terminal_basic() {
-        let target = SshTarget { host: "example.com".into(), user: Some("admin".into()), port: None };
+        let target = SshTarget {
+            host: "example.com".into(),
+            user: Some("admin".into()),
+            port: None,
+        };
         let args = ssh_args_for_terminal(&target, Path::new("/home/user/project"));
         assert_eq!(args[0], "ssh");
         assert_eq!(args[1], "-t");
         assert!(args.contains(&"admin@example.com".to_string()));
-        // Should contain cd command at the end
+        // Should contain the shell fallback wrapper at the end.
         let last = args.last().unwrap();
         assert!(last.starts_with("cd "));
+        assert!(last.contains("exec \"$SHELL\" -l"));
+        assert!(last.contains("exec bash -l"));
         assert!(last.contains("/home/user/project"));
     }
 
     #[test]
     fn ssh_args_for_terminal_with_port() {
-        let target = SshTarget { host: "h".into(), user: None, port: Some(2222) };
+        let target = SshTarget {
+            host: "h".into(),
+            user: None,
+            port: Some(2222),
+        };
         let args = ssh_args_for_terminal(&target, Path::new("/tmp"));
         assert!(args.contains(&"-p".to_string()));
         assert!(args.contains(&"2222".to_string()));
+    }
+
+    #[test]
+    fn shell_words_quotes_program_and_args() {
+        assert_eq!(
+            shell_words("git", &["status", "--porcelain=v1"]),
+            "'git' 'status' '--porcelain=v1'"
+        );
+    }
+
+    #[test]
+    fn login_shell_wrapper_uses_fallbacks() {
+        let wrapped = wrap_login_shell_script("cd '/repo' && 'git' 'status'");
+        assert!(wrapped.contains("exec \"$SHELL\" -lc"));
+        assert!(wrapped.contains("exec bash -lc"));
+        assert!(wrapped.contains("exec zsh -lc"));
+        assert!(wrapped.contains("exec fish -lc"));
+        assert!(wrapped.contains("exec sh -c"));
+    }
+
+    #[test]
+    fn remote_command_wraps_script_in_login_shell() {
+        let cmd = remote_command(Path::new("/tmp/repo"), "git", &["status"]);
+        assert!(cmd.contains("exec \"$SHELL\" -lc"));
+        assert!(cmd.contains("cd '\\''/tmp/repo'\\'' && '\\''git'\\'' '\\''status'\\'''"));
+    }
+
+    #[test]
+    fn remote_terminal_command_has_fallback_shells() {
+        let cmd = remote_terminal_shell_command(Path::new("/tmp/repo"));
+        assert!(cmd.starts_with("cd "));
+        assert!(cmd.contains("exec \"$SHELL\" -l"));
+        assert!(cmd.contains("exec bash -l"));
+        assert!(cmd.contains("exec zsh -l"));
+        assert!(cmd.contains("exec fish -l"));
+        assert!(cmd.contains("else exec sh; fi"));
     }
 }

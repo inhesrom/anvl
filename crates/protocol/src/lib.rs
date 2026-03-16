@@ -279,7 +279,9 @@ mod tests {
     use super::*;
     use uuid::Uuid;
 
-    fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(
+    fn round_trip<
+        T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug,
+    >(
         val: &T,
     ) {
         let json = serde_json::to_string(val).expect("serialize");
@@ -289,8 +291,16 @@ mod tests {
 
     #[test]
     fn ssh_target_round_trip() {
-        round_trip(&SshTarget { host: "h".into(), user: Some("u".into()), port: Some(22) });
-        round_trip(&SshTarget { host: "h".into(), user: None, port: None });
+        round_trip(&SshTarget {
+            host: "h".into(),
+            user: Some("u".into()),
+            port: Some(22),
+        });
+        round_trip(&SshTarget {
+            host: "h".into(),
+            user: None,
+            port: None,
+        });
     }
 
     #[test]
@@ -301,7 +311,12 @@ mod tests {
 
     #[test]
     fn attention_level_round_trip() {
-        for level in [AttentionLevel::None, AttentionLevel::Notice, AttentionLevel::NeedsInput, AttentionLevel::Error] {
+        for level in [
+            AttentionLevel::None,
+            AttentionLevel::Notice,
+            AttentionLevel::NeedsInput,
+            AttentionLevel::Error,
+        ] {
             round_trip(&level);
         }
     }
@@ -332,22 +347,40 @@ mod tests {
 
     #[test]
     fn changed_file_round_trip() {
-        round_trip(&ChangedFile { path: "foo.rs".into(), index_status: 'M', worktree_status: ' ' });
+        round_trip(&ChangedFile {
+            path: "foo.rs".into(),
+            index_status: 'M',
+            worktree_status: ' ',
+        });
     }
 
     #[test]
     fn commit_info_round_trip() {
-        round_trip(&CommitInfo { hash: "abc123".into(), message: "fix".into(), author: "dev".into(), date: "2h ago".into() });
+        round_trip(&CommitInfo {
+            hash: "abc123".into(),
+            message: "fix".into(),
+            author: "dev".into(),
+            date: "2h ago".into(),
+        });
     }
 
     #[test]
     fn branch_info_round_trip() {
-        round_trip(&BranchInfo { name: "main".into(), is_head: true, ahead: Some(1), behind: None });
+        round_trip(&BranchInfo {
+            name: "main".into(),
+            is_head: true,
+            ahead: Some(1),
+            behind: None,
+        });
     }
 
     #[test]
     fn tag_info_round_trip() {
-        round_trip(&TagInfo { name: "v1.0".into(), hash: "abc".into(), date: "1d ago".into() });
+        round_trip(&TagInfo {
+            name: "v1.0".into(),
+            hash: "abc".into(),
+            date: "1d ago".into(),
+        });
     }
 
     #[test]
@@ -358,11 +391,31 @@ mod tests {
             upstream: Some("origin/main".into()),
             ahead: Some(1),
             behind: Some(0),
-            changed: vec![ChangedFile { path: "f.rs".into(), index_status: 'M', worktree_status: ' ' }],
-            recent_commits: vec![CommitInfo { hash: "a".into(), message: "m".into(), author: "a".into(), date: "d".into() }],
-            local_branches: vec![BranchInfo { name: "main".into(), is_head: true, ahead: None, behind: None }],
-            remote_branches: vec![RemoteBranchInfo { full_name: "origin/main".into() }],
-            tags: vec![TagInfo { name: "v1".into(), hash: "h".into(), date: "d".into() }],
+            changed: vec![ChangedFile {
+                path: "f.rs".into(),
+                index_status: 'M',
+                worktree_status: ' ',
+            }],
+            recent_commits: vec![CommitInfo {
+                hash: "a".into(),
+                message: "m".into(),
+                author: "a".into(),
+                date: "d".into(),
+            }],
+            local_branches: vec![BranchInfo {
+                name: "main".into(),
+                is_head: true,
+                ahead: None,
+                behind: None,
+            }],
+            remote_branches: vec![RemoteBranchInfo {
+                full_name: "origin/main".into(),
+            }],
+            tags: vec![TagInfo {
+                name: "v1".into(),
+                hash: "h".into(),
+                date: "d".into(),
+            }],
         });
     }
 
@@ -372,41 +425,118 @@ mod tests {
         let commands = vec![
             Command::SetRoute(Route::Home),
             Command::SetRoute(Route::Workspace { id }),
-            Command::AddWorkspace { name: "ws".into(), path: "/p".into(), ssh: None },
             Command::AddWorkspace {
                 name: "ws".into(),
                 path: "/p".into(),
-                ssh: Some(SshTarget { host: "h".into(), user: Some("u".into()), port: Some(22) }),
+                ssh: None,
+            },
+            Command::AddWorkspace {
+                name: "ws".into(),
+                path: "/p".into(),
+                ssh: Some(SshTarget {
+                    host: "h".into(),
+                    user: Some("u".into()),
+                    port: Some(22),
+                }),
             },
             Command::RemoveWorkspace { id },
-            Command::RenameWorkspace { id, name: "n".into() },
-            Command::SetAttention { id, level: AttentionLevel::Error },
+            Command::RenameWorkspace {
+                id,
+                name: "n".into(),
+            },
+            Command::SetAttention {
+                id,
+                level: AttentionLevel::Error,
+            },
             Command::ClearAttention { id },
             Command::RefreshGit { id },
-            Command::LoadDiff { id, file: "f".into() },
-            Command::LoadCommitDiff { id, hash: "h".into() },
-            Command::LoadCommitFiles { id, hash: "h".into() },
-            Command::LoadCommitFileDiff { id, hash: "h".into(), file: "f".into() },
-            Command::GitStageFile { id, file: "f".into() },
-            Command::GitUnstageFile { id, file: "f".into() },
+            Command::LoadDiff {
+                id,
+                file: "f".into(),
+            },
+            Command::LoadCommitDiff {
+                id,
+                hash: "h".into(),
+            },
+            Command::LoadCommitFiles {
+                id,
+                hash: "h".into(),
+            },
+            Command::LoadCommitFileDiff {
+                id,
+                hash: "h".into(),
+                file: "f".into(),
+            },
+            Command::GitStageFile {
+                id,
+                file: "f".into(),
+            },
+            Command::GitUnstageFile {
+                id,
+                file: "f".into(),
+            },
             Command::GitStageAll { id },
             Command::GitUnstageAll { id },
-            Command::GitCommit { id, message: "m".into() },
-            Command::GitCheckoutBranch { id, branch: "b".into() },
-            Command::GitCheckoutRemoteBranch { id, remote_branch: "origin/b".into(), local_name: "b".into() },
-            Command::GitCreateBranch { id, branch: "b".into() },
+            Command::GitCommit {
+                id,
+                message: "m".into(),
+            },
+            Command::GitCheckoutBranch {
+                id,
+                branch: "b".into(),
+            },
+            Command::GitCheckoutRemoteBranch {
+                id,
+                remote_branch: "origin/b".into(),
+                local_name: "b".into(),
+            },
+            Command::GitCreateBranch {
+                id,
+                branch: "b".into(),
+            },
             Command::GitPush { id },
             Command::GitPull { id },
             Command::GitFetch { id },
-            Command::GitDiscardFile { id, file: "f".into() },
-            Command::GitStash { id, message: Some("msg".into()) },
+            Command::GitDiscardFile {
+                id,
+                file: "f".into(),
+            },
+            Command::GitStash {
+                id,
+                message: Some("msg".into()),
+            },
             Command::GitStash { id, message: None },
             Command::GitStashPullPop { id },
-            Command::StartTerminal { id, kind: TerminalKind::Agent, tab_id: None, cmd: vec!["bash".into()] },
-            Command::StartTerminal { id, kind: TerminalKind::Shell, tab_id: Some("t".into()), cmd: vec![] },
-            Command::StopTerminal { id, kind: TerminalKind::Agent, tab_id: None },
-            Command::SendTerminalInput { id, kind: TerminalKind::Shell, tab_id: None, data_b64: "aGVsbG8=".into() },
-            Command::ResizeTerminal { id, kind: TerminalKind::Shell, tab_id: None, cols: 80, rows: 24 },
+            Command::StartTerminal {
+                id,
+                kind: TerminalKind::Agent,
+                tab_id: None,
+                cmd: vec!["bash".into()],
+            },
+            Command::StartTerminal {
+                id,
+                kind: TerminalKind::Shell,
+                tab_id: Some("t".into()),
+                cmd: vec![],
+            },
+            Command::StopTerminal {
+                id,
+                kind: TerminalKind::Agent,
+                tab_id: None,
+            },
+            Command::SendTerminalInput {
+                id,
+                kind: TerminalKind::Shell,
+                tab_id: None,
+                data_b64: "aGVsbG8=".into(),
+            },
+            Command::ResizeTerminal {
+                id,
+                kind: TerminalKind::Shell,
+                tab_id: None,
+                cols: 80,
+                rows: 24,
+            },
         ];
         for cmd in &commands {
             round_trip(cmd);
@@ -418,16 +548,56 @@ mod tests {
         let id = Uuid::new_v4();
         let events = vec![
             Event::WorkspaceList { items: vec![] },
-            Event::WorkspaceGitUpdated { id, git: GitState::default() },
-            Event::WorkspaceDiffUpdated { id, file: "f".into(), diff: "d".into() },
-            Event::CommitFilesLoaded { id, hash: "h".into(), files: vec!["a".into()] },
-            Event::WorkspaceAttentionChanged { id, level: AttentionLevel::NeedsInput },
-            Event::TerminalStarted { id, kind: TerminalKind::Agent, tab_id: None },
-            Event::TerminalExited { id, kind: TerminalKind::Shell, tab_id: Some("t".into()), code: Some(0) },
-            Event::TerminalExited { id, kind: TerminalKind::Shell, tab_id: None, code: None },
-            Event::TerminalOutput { id, kind: TerminalKind::Agent, tab_id: None, data_b64: "b64".into() },
-            Event::GitActionResult { id, action: "push".into(), success: true, message: "ok".into() },
-            Event::Error { message: "oops".into() },
+            Event::WorkspaceGitUpdated {
+                id,
+                git: GitState::default(),
+            },
+            Event::WorkspaceDiffUpdated {
+                id,
+                file: "f".into(),
+                diff: "d".into(),
+            },
+            Event::CommitFilesLoaded {
+                id,
+                hash: "h".into(),
+                files: vec!["a".into()],
+            },
+            Event::WorkspaceAttentionChanged {
+                id,
+                level: AttentionLevel::NeedsInput,
+            },
+            Event::TerminalStarted {
+                id,
+                kind: TerminalKind::Agent,
+                tab_id: None,
+            },
+            Event::TerminalExited {
+                id,
+                kind: TerminalKind::Shell,
+                tab_id: Some("t".into()),
+                code: Some(0),
+            },
+            Event::TerminalExited {
+                id,
+                kind: TerminalKind::Shell,
+                tab_id: None,
+                code: None,
+            },
+            Event::TerminalOutput {
+                id,
+                kind: TerminalKind::Agent,
+                tab_id: None,
+                data_b64: "b64".into(),
+            },
+            Event::GitActionResult {
+                id,
+                action: "push".into(),
+                success: true,
+                message: "ok".into(),
+            },
+            Event::Error {
+                message: "oops".into(),
+            },
         ];
         for evt in &events {
             round_trip(evt);
