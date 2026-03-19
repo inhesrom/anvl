@@ -37,6 +37,7 @@ enum LaunchMode {
     ListSessions,
     RunDaemon { name: String },
     Update,
+    Reinstall,
 }
 
 #[derive(Debug)]
@@ -84,6 +85,7 @@ OPTIONS:
     -l, --list             List active sessions
     -d, --detach           Start session in background only (with -s or -a)
     -u, --update           Update to the latest release from GitHub
+        --reinstall        Reinstall the latest release (even if already up to date)
     -V, --version          Print version
     -h, --help             Print this help
 
@@ -143,6 +145,10 @@ fn parse_cli(args: Vec<String>) -> Result<Cli> {
             }
             "-u" | "--update" => {
                 mode = LaunchMode::Update;
+                i += 1;
+            }
+            "--reinstall" => {
+                mode = LaunchMode::Reinstall;
                 i += 1;
             }
             "-h" | "--help" => {
@@ -209,7 +215,8 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     match cli.mode {
-        LaunchMode::Update => self_update(),
+        LaunchMode::Update => self_update(false),
+        LaunchMode::Reinstall => self_update(true),
         LaunchMode::RunDaemon { name } => run_daemon(&name).await,
         LaunchMode::RemoveSession { name } => delete_session(&name),
         LaunchMode::ListSessions => list_sessions(),
@@ -255,7 +262,7 @@ async fn main() -> Result<()> {
     }
 }
 
-fn self_update() -> Result<()> {
+fn self_update(force: bool) -> Result<()> {
     let current_version = env!("CARGO_PKG_VERSION");
 
     // Fetch latest release info from GitHub
@@ -278,12 +285,16 @@ fn self_update() -> Result<()> {
 
     let latest_version = tag.strip_prefix('v').unwrap_or(&tag);
 
-    if latest_version == current_version {
+    if latest_version == current_version && !force {
         println!("anvl is already up to date (v{current_version})");
         return Ok(());
     }
 
-    println!("updating anvl v{current_version} -> v{latest_version}...");
+    if latest_version == current_version {
+        println!("reinstalling anvl v{current_version}...");
+    } else {
+        println!("updating anvl v{current_version} -> v{latest_version}...");
+    }
 
     // Detect platform
     let os_output = OsCommand::new("uname").arg("-s").output()?;
@@ -2524,7 +2535,6 @@ async fn handle_mouse(
                     ui::screens::workspace::hit_test(area, app, mouse.column, mouse.row)
                 {
                     match hit {
-                        ui::screens::workspace::WorkspaceHit::Header => {}
                         ui::screens::workspace::WorkspaceHit::TerminalTab(idx) => {
                             app.focus = app::Focus::WsTerminalTabs;
                             app.set_active_tab_index(idx);
