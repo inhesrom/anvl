@@ -626,7 +626,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         .map(|id| app.terminal_lines(id, &app.active_tab_id()))
         .unwrap_or_else(|| vec![Line::from("No terminal output yet.")]);
     let (term_style, term_border_type) =
-        pane_border_style(terminal_focused || tabs_focused, attention, app.spinner_tick % 2 == 0);
+        pane_border_style(terminal_focused, attention, app.spinner_tick % 2 == 0);
 
     // Render terminal pane with Borders::ALL — we'll overwrite the top border row
     frame.render_widget(Clear, l.terminal_pane);
@@ -673,6 +673,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         ws_info.clone()
     };
     let ws_info_width = ws_info_display.len() as u16;
+    let passthrough_badge = " [passthrough]";
+    let passthrough_on = app.active_tab_passthrough();
+    let left_info_width = if passthrough_on {
+        ws_info_width + passthrough_badge.len() as u16 + 1
+    } else {
+        ws_info_width
+    };
 
     // Compute tab label widths and positions
     let tab_label_widths: Vec<u16> = tab_labels
@@ -680,7 +687,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         .enumerate()
         .map(|(i, lbl)| format!(" {}: {} ", i + 1, lbl).len() as u16)
         .collect();
-    let tab_ranges = compute_tab_ranges(&pane, ws_info_width, &tab_label_widths);
+    let tab_ranges = compute_tab_ranges(&pane, left_info_width, &tab_label_widths);
 
     let active = app.ws_active_tab;
 
@@ -692,6 +699,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &TuiApp) {
         let x = inner_left + 1 + i as u16; // +1 for a space after the border
         if x < inner_right && x < buf.area().width && border_y < buf.area().height {
             buf[(x, border_y)].set_char(ch).set_style(ws_info_style);
+        }
+    }
+
+    // Show passthrough badge after workspace info when the active tab has passthrough on
+    if app.active_tab_passthrough() {
+        let badge = " [passthrough]";
+        let badge_style = Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD);
+        let badge_start = inner_left + 1 + ws_info_display.len() as u16 + 1;
+        for (i, ch) in badge.chars().enumerate() {
+            let x = badge_start + i as u16;
+            if x < inner_right && x < buf.area().width && border_y < buf.area().height {
+                buf[(x, border_y)].set_char(ch).set_style(badge_style);
+            }
         }
     }
 
@@ -962,7 +984,12 @@ pub fn hit_test(area: Rect, app: &TuiApp, x: u16, y: u16) -> Option<WorkspaceHit
             let ws_info_width = {
                 let info = ws_info_string(app);
                 let max_w = inner_width / 2;
-                (info.len() as u16).min(max_w)
+                let base = (info.len() as u16).min(max_w);
+                if app.active_tab_passthrough() {
+                    base + " [passthrough]".len() as u16 + 1
+                } else {
+                    base
+                }
             };
             let tab_label_widths: Vec<u16> = app
                 .ws_tabs
@@ -1214,7 +1241,12 @@ mod tests {
         let inner_right = pane.right().saturating_sub(1);
         let inner_width = inner_right.saturating_sub(inner_left);
         let info = ws_info_string(app);
-        let ws_info_width = (info.len() as u16).min(inner_width / 2);
+        let base_w = (info.len() as u16).min(inner_width / 2);
+        let ws_info_width = if app.active_tab_passthrough() {
+            base_w + " [passthrough]".len() as u16 + 1
+        } else {
+            base_w
+        };
         let label_widths: Vec<u16> = app
             .ws_tabs
             .iter()
