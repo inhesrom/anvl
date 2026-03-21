@@ -1181,10 +1181,24 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
             }
         }
 
-        // Update cached grid height for scroll calculations.
+        // Update cached grid height for scroll calculations and resize
+        // agent terminal parsers so preview content reflows to tile width.
         if let Ok(size) = terminal.size() {
             let area = Rect::new(0, 0, size.width, size.height);
-            app.last_grid_height = ui::screens::home::grid_rect(area).height;
+            let grid = ui::screens::home::grid_rect(area);
+            app.last_grid_height = grid.height;
+
+            if matches!(app.route, Route::Home) {
+                let preview_cols = grid.width.saturating_sub(6);
+                let ids: Vec<_> = app.workspaces.iter().map(|w| w.id).collect();
+                for id in ids {
+                    if let Some((rows, cols)) = app.agent_parser_size(id) {
+                        if cols != preview_cols {
+                            app.resize_terminal_parser(id, "agent", preview_cols, rows);
+                        }
+                    }
+                }
+            }
         }
 
         let mut pending_clipboard_text: Option<String> = None;

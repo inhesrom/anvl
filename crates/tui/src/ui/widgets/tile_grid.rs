@@ -3,7 +3,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
 };
 
@@ -47,6 +47,14 @@ pub fn render(
         return;
     }
 
+    let total_h = total_height(items.len(), expanded, expanded_h);
+    let needs_scrollbar = total_h > area.height;
+    let tile_area = if needs_scrollbar {
+        Rect { width: area.width.saturating_sub(1), ..area }
+    } else {
+        area
+    };
+
     let mut virtual_y: u16 = 0;
     for (i, td) in items.iter().enumerate() {
         let is_expanded = expanded.contains(&i);
@@ -59,15 +67,15 @@ pub fn render(
         virtual_y += tile_h;
 
         // Skip tiles entirely above or below the viewport
-        if vis_bottom == 0 || vis_top >= area.height {
+        if vis_bottom == 0 || vis_top >= tile_area.height {
             continue;
         }
 
         let tile = Rect {
-            x: area.x,
-            y: area.y + vis_top,
-            width: area.width,
-            height: vis_bottom.saturating_sub(vis_top).min(area.height - vis_top),
+            x: tile_area.x,
+            y: tile_area.y + vis_top,
+            width: tile_area.width,
+            height: vis_bottom.saturating_sub(vis_top).min(tile_area.height - vis_top),
         };
 
         if tile.width < 8 || tile.height < TILE_H.min(tile_h) {
@@ -82,6 +90,22 @@ pub fn render(
             is_expanded,
             flash_on,
             attention_enabled,
+        );
+    }
+
+    // Scrollbar
+    if needs_scrollbar {
+        let max_offset = total_h.saturating_sub(area.height);
+        let mut scrollbar_state = ScrollbarState::new(max_offset as usize)
+            .position(scroll_offset as usize);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_style(Style::default().fg(Color::DarkGray))
+                .thumb_style(Style::default().fg(Color::White)),
+            area,
+            &mut scrollbar_state,
         );
     }
 }
