@@ -1513,6 +1513,31 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                     }
                                     _ => {}
                                 }
+                            } else if app.moving_workspace {
+                                match key.code {
+                                    KeyCode::Down | KeyCode::Char('j') => {
+                                        if let Some((id, delta)) = app.swap_workspace(1) {
+                                            let _ = backend
+                                                .cmd_tx
+                                                .send(Command::MoveWorkspace { id, delta })
+                                                .await;
+                                        }
+                                    }
+                                    KeyCode::Up | KeyCode::Char('k') => {
+                                        if let Some((id, delta)) = app.swap_workspace(-1) {
+                                            let _ = backend
+                                                .cmd_tx
+                                                .send(Command::MoveWorkspace { id, delta })
+                                                .await;
+                                        }
+                                    }
+                                    KeyCode::Esc
+                                    | KeyCode::Enter
+                                    | KeyCode::Char('M') => {
+                                        app.end_move_workspace();
+                                    }
+                                    _ => {}
+                                }
                             } else {
                                 // Shift+Enter: send Enter to the agent terminal
                                 // without leaving the home screen.
@@ -1603,6 +1628,7 @@ async fn run_tui(mut backend: Backend) -> Result<()> {
                                             .to_string();
                                         app.begin_add_workspace(cwd);
                                     }
+                                    KeyCode::Char('M') => app.begin_move_workspace(),
                                     KeyCode::Char('R') => app.begin_add_ssh_workspace(),
                                     KeyCode::Char('D') => app.begin_delete_workspace(),
                                     KeyCode::Char('e') => app.begin_rename_workspace_home(),

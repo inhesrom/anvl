@@ -89,6 +89,17 @@ pub fn build_footer_hints(app: &TuiApp) -> Line<'static> {
                     key("Esc"),
                     desc(" cancel"),
                 ]
+            } else if app.moving_workspace {
+                vec![
+                    key("j/k"),
+                    desc(" move"),
+                    gap(),
+                    key("Enter"),
+                    desc(" done"),
+                    gap(),
+                    key("Esc"),
+                    desc(" done"),
+                ]
             } else {
                 vec![
                     key("Enter"),

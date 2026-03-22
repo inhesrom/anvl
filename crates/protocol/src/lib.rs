@@ -112,6 +112,10 @@ pub enum Command {
         id: WorkspaceId,
         name: String,
     },
+    MoveWorkspace {
+        id: WorkspaceId,
+        delta: i32,
+    },
     SetAttention {
         id: WorkspaceId,
         level: AttentionLevel,
@@ -453,6 +457,8 @@ mod tests {
                 id,
                 name: "n".into(),
             },
+            Command::MoveWorkspace { id, delta: 1 },
+            Command::MoveWorkspace { id, delta: -1 },
             Command::SetAttention {
                 id,
                 level: AttentionLevel::Error,

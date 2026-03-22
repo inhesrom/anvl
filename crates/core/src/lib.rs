@@ -98,6 +98,17 @@ pub fn spawn_core() -> CoreHandle {
                         ws.last_activity = Instant::now();
                     }
                 }
+                Command::MoveWorkspace { id, delta } => {
+                    if let Some(pos) = state.ordered_ids.iter().position(|wid| *wid == id) {
+                        let new_pos = (pos as i32 + delta)
+                            .max(0)
+                            .min(state.ordered_ids.len() as i32 - 1) as usize;
+                        if pos != new_pos {
+                            let removed = state.ordered_ids.remove(pos);
+                            state.ordered_ids.insert(new_pos, removed);
+                        }
+                    }
+                }
                 Command::SetAttention { id, level } => {
                     if let Some(ws) = state.workspaces.get_mut(&id) {
                         ws.attention = level;

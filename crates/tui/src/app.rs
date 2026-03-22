@@ -336,6 +336,8 @@ pub struct TuiApp {
     pub ws_expanded_commit: Option<usize>,
     pub commit_files_cache: HashMap<String, Vec<String>>,
     pub ws_tag_filter: bool,
+    /// Whether the user is in move-workspace mode on the home screen.
+    pub moving_workspace: bool,
     /// Indices of expanded tiles on the home screen.
     pub home_expanded_tiles: HashSet<usize>,
     /// Vertical scroll offset for the home tile list.
@@ -395,6 +397,7 @@ impl Default for TuiApp {
             ws_expanded_commit: None,
             commit_files_cache: HashMap::new(),
             ws_tag_filter: false,
+            moving_workspace: false,
             home_expanded_tiles: HashSet::new(),
             home_scroll_offset: 0,
             last_grid_height: 0,
@@ -457,6 +460,44 @@ impl TuiApp {
         let new_idx = (self.home_selected as isize + delta).clamp(0, (len - 1) as isize);
         self.home_selected = new_idx as usize;
         self.ensure_home_selected_visible();
+    }
+
+    pub fn begin_move_workspace(&mut self) {
+        if !self.workspaces.is_empty() {
+            self.moving_workspace = true;
+        }
+    }
+
+    pub fn end_move_workspace(&mut self) {
+        self.moving_workspace = false;
+    }
+
+    /// Swap the selected workspace in the given direction and follow it.
+    /// Returns the id and delta for sending a MoveWorkspace command.
+    pub fn swap_workspace(&mut self, delta: isize) -> Option<(protocol::WorkspaceId, i32)> {
+        let len = self.workspaces.len();
+        if len < 2 {
+            return None;
+        }
+        let cur = self.home_selected;
+        let new_idx = (cur as isize + delta).clamp(0, (len - 1) as isize) as usize;
+        if cur == new_idx {
+            return None;
+        }
+        let id = self.workspaces[cur].id;
+        self.workspaces.swap(cur, new_idx);
+        // Move expanded-tile tracking to match
+        let cur_expanded = self.home_expanded_tiles.remove(&cur);
+        let new_expanded = self.home_expanded_tiles.remove(&new_idx);
+        if cur_expanded {
+            self.home_expanded_tiles.insert(new_idx);
+        }
+        if new_expanded {
+            self.home_expanded_tiles.insert(cur);
+        }
+        self.home_selected = new_idx;
+        self.ensure_home_selected_visible();
+        Some((id, delta as i32))
     }
 
     pub fn toggle_home_expanded_tile(&mut self) {
