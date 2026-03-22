@@ -27,15 +27,15 @@ jobs:
         run: cargo build --release -p tui
 
       - name: Verify binary version
-        run: test "$(target/release/anvl --version | awk '{print $2}')" = "${GITHUB_REF_NAME#v}"
+        run: test "$(target/release/conduit --version | awk '{print $2}')" = "${GITHUB_REF_NAME#v}"
 
       - name: Package
-        run: tar czf anvl-${{ matrix.target }}.tar.gz -C target/release anvl
+        run: tar czf conduit-${{ matrix.target }}.tar.gz -C target/release conduit
 
       - uses: actions/upload-artifact@v4
         with:
-          name: anvl-${{ matrix.target }}
-          path: anvl-${{ matrix.target }}.tar.gz
+          name: conduit-${{ matrix.target }}
+          path: conduit-${{ matrix.target }}.tar.gz
 
   release:
     needs: build
@@ -48,4 +48,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          files: anvl-*.tar.gz
+          files: conduit-*.tar.gz

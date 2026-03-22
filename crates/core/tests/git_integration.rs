@@ -3,7 +3,7 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-use anvl_core::workspace::git::{commit, diff_file, refresh_git, stage_file, unstage_file};
+use conduit_core::workspace::git::{commit, diff_file, refresh_git, stage_file, unstage_file};
 
 // ---------------------------------------------------------------------------
 // Helper: initialise a throwaway git repo inside a TempDir

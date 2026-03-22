@@ -1,19 +1,19 @@
 #!/bin/bash
 set -e
 
-INSTALL_DIR="${ANVL_INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${CONDUIT_INSTALL_DIR:-$HOME/.local/bin}"
 
-echo "Building anvl (release)..."
+echo "Building conduit (release)..."
 cargo build --release -p tui
 
 VERSION=$(cargo metadata --no-deps --format-version 1 | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 mkdir -p "$INSTALL_DIR"
-rm -f "$INSTALL_DIR/anvl"
-cp target/release/anvl "$INSTALL_DIR/anvl"
-chmod +x "$INSTALL_DIR/anvl"
+rm -f "$INSTALL_DIR/conduit"
+cp target/release/conduit "$INSTALL_DIR/conduit"
+chmod +x "$INSTALL_DIR/conduit"
 
-echo "Installed anvl ${VERSION} to ${INSTALL_DIR}/anvl"
+echo "Installed conduit ${VERSION} to ${INSTALL_DIR}/conduit"
 
 case ":$PATH:" in
   *":${INSTALL_DIR}:"*) ;;

@@ -4,12 +4,12 @@ version.workspace = true
 edition = "2021"
 
 [[bin]]
-name = "anvl"
+name = "conduit"
 path = "src/main.rs"
 
 [dependencies]
 protocol = { path = "../protocol" }
-anvl_core = { path = "../core" }
+conduit_core = { path = "../core" }
 anyhow = "1"
 base64 = "0.22"
 vt100 = "0.15"

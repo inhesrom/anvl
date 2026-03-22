@@ -1798,7 +1798,7 @@ fn tabs_persist_path() -> Option<PathBuf> {
     } else {
         return None;
     };
-    Some(base.join("anvl").join("tui_tabs.json"))
+    Some(base.join("conduit").join("tui_tabs.json"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1834,7 +1834,7 @@ fn settings_persist_path() -> Option<PathBuf> {
     } else {
         return None;
     };
-    Some(base.join("anvl").join("settings.json"))
+    Some(base.join("conduit").join("settings.json"))
 }
 
 fn load_settings() -> Settings {
@@ -1867,7 +1867,7 @@ fn ssh_history_path() -> Option<PathBuf> {
     } else {
         return None;
     };
-    Some(base.join("anvl").join("ssh_history.json"))
+    Some(base.join("conduit").join("ssh_history.json"))
 }
 
 fn load_ssh_history() -> Vec<SshHistoryEntry> {

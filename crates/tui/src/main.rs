@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as OsCommand, Stdio};
 use std::time::{Duration, Instant};
 
-use anvl_core::{spawn_core, CoreHandle};
+use conduit_core::{spawn_core, CoreHandle};
 use anyhow::{anyhow, Context, Result};
 use app::TuiApp;
 use base64::Engine as _;
@@ -74,10 +74,10 @@ struct GitHubRelease {
 fn print_help() {
     println!(
         "\
-anvl {}
+conduit {}
 
 USAGE:
-    anvl [OPTIONS]
+    conduit[OPTIONS]
 
 OPTIONS:
     -s, --session <name>   Create (or reattach to) a named session
@@ -91,12 +91,12 @@ OPTIONS:
     -h, --help             Print this help
 
 EXAMPLES:
-    anvl                   Launch in local (non-session) mode
-    anvl -s work           Create or reattach to session 'work'
-    anvl -s work -d        Start session 'work' in background
-    anvl -a work           Attach to running session 'work'
-    anvl -l                List sessions
-    anvl -r work           Remove session 'work'",
+    conduit                  Launch in local (non-session) mode
+    conduit-s work           Create or reattach to session 'work'
+    conduit-s work -d        Start session 'work' in background
+    conduit-a work           Attach to running session 'work'
+    conduit-l                List sessions
+    conduit-r work           Remove session 'work'",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -212,7 +212,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if cli.version {
-        println!("anvl {}", env!("CARGO_PKG_VERSION"));
+        println!("conduit {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
     match cli.mode {
@@ -233,7 +233,7 @@ async fn main() -> Result<()> {
         LaunchMode::AttachSession { name } => {
             let entry = get_session(&name)?.ok_or_else(|| {
                 anyhow!(
-                    "session '{}' not found. create it with: anvl -s {}",
+                    "session '{}' not found. create it with: conduit -s {}",
                     name,
                     name
                 )
@@ -254,7 +254,7 @@ async fn main() -> Result<()> {
         LaunchMode::Local => {
             if cli.detach {
                 return Err(anyhow!(
-                    "--detach requires a named session: use `anvl -s <name> -d` or `anvl -a <name> -d`"
+                    "--detach requires a named session: use `conduit -s <name> -d` or `conduit -a <name> -d`"
                 ));
             }
             let (backend, _core) = build_local_backend();
@@ -270,7 +270,7 @@ fn self_update(force: bool) -> Result<()> {
     let api_output = OsCommand::new("curl")
         .args([
             "-fsSL",
-            "https://api.github.com/repos/inhesrom/anvl/releases/latest",
+            "https://api.github.com/repos/inhesrom/conduit/releases/latest",
         ])
         .output()
         .context("failed to run curl — is it installed?")?;
@@ -287,14 +287,14 @@ fn self_update(force: bool) -> Result<()> {
     let latest_version = tag.strip_prefix('v').unwrap_or(&tag);
 
     if latest_version == current_version && !force {
-        println!("anvl is already up to date (v{current_version})");
+        println!("conduit is already up to date (v{current_version})");
         return Ok(());
     }
 
     if latest_version == current_version {
-        println!("reinstalling anvl v{current_version}...");
+        println!("reinstalling conduit v{current_version}...");
     } else {
-        println!("updating anvl v{current_version} -> v{latest_version}...");
+        println!("updating conduit v{current_version} -> v{latest_version}...");
     }
 
     // Detect platform
@@ -311,14 +311,14 @@ fn self_update(force: bool) -> Result<()> {
     let target = detect_release_target(&os_name, &arch_name)?;
 
     let url =
-        format!("https://github.com/inhesrom/anvl/releases/download/{tag}/anvl-{target}.tar.gz");
+        format!("https://github.com/inhesrom/conduit/releases/download/{tag}/conduit-{target}.tar.gz");
 
     // Download to a temp directory
-    let tmp_dir = std::env::temp_dir().join(format!("anvl-update-{}", std::process::id()));
+    let tmp_dir = std::env::temp_dir().join(format!("conduit-update-{}", std::process::id()));
     std::fs::create_dir_all(&tmp_dir)?;
     let _cleanup = TempDirGuard(tmp_dir.clone());
 
-    let tarball = tmp_dir.join("anvl.tar.gz");
+    let tarball = tmp_dir.join("conduit.tar.gz");
     let dl_status = OsCommand::new("curl")
         .args(["-fsSL", &url, "-o"])
         .arg(&tarball)
@@ -343,13 +343,13 @@ fn self_update(force: bool) -> Result<()> {
     // Replace the current binary
     let current_exe =
         std::env::current_exe().context("cannot determine current executable path")?;
-    let new_binary = tmp_dir.join("anvl");
+    let new_binary = tmp_dir.join("conduit");
     if !new_binary.exists() {
-        return Err(anyhow!("extracted archive does not contain 'anvl' binary"));
+        return Err(anyhow!("extracted archive does not contain 'conduit' binary"));
     }
-    let downloaded_version = read_anvl_version(&new_binary).with_context(|| {
+    let downloaded_version = read_conduit_version(&new_binary).with_context(|| {
         format!(
-            "downloaded release asset at {} is not a valid anvl binary",
+            "downloaded release asset at {} is not a valid conduit binary",
             new_binary.display()
         )
     })?;
@@ -376,7 +376,7 @@ fn self_update(force: bool) -> Result<()> {
         std::fs::set_permissions(&current_exe, std::fs::Permissions::from_mode(0o755))?;
     }
 
-    let installed_version = read_anvl_version(&current_exe).with_context(|| {
+    let installed_version = read_conduit_version(&current_exe).with_context(|| {
         format!(
             "installed binary at {} could not be verified after update",
             current_exe.display()
@@ -391,18 +391,18 @@ fn self_update(force: bool) -> Result<()> {
         ));
     }
 
-    if let Some(path_binary) = find_binary_on_path("anvl") {
+    if let Some(path_binary) = find_binary_on_path("conduit") {
         if !same_executable(&path_binary, &current_exe) {
-            let path_version = read_anvl_version(&path_binary).with_context(|| {
+            let path_version = read_conduit_version(&path_binary).with_context(|| {
                 format!(
-                    "`anvl` on PATH resolves to {}, which is different from the updated binary at {}",
+                    "`conduit` on PATH resolves to {}, which is different from the updated binary at {}",
                     path_binary.display(),
                     current_exe.display()
                 )
             })?;
             if path_version != latest_version {
                 return Err(anyhow!(
-                    "updated {} to v{}, but `anvl` on PATH resolves to {} and reports v{}. Adjust PATH or update that install.",
+                    "updated {} to v{}, but `conduit` on PATH resolves to {} and reports v{}. Adjust PATH or update that install.",
                     current_exe.display(),
                     latest_version,
                     path_binary.display(),
@@ -413,7 +413,7 @@ fn self_update(force: bool) -> Result<()> {
     }
 
     println!(
-        "anvl updated to v{latest_version} at {}",
+        "conduit updated to v{latest_version} at {}",
         current_exe.display()
     );
     Ok(())
@@ -437,13 +437,13 @@ fn detect_release_target(os_name: &str, arch_name: &str) -> Result<&'static str>
     }
 }
 
-fn parse_anvl_version_output(output: &str) -> Option<&str> {
+fn parse_conduit_version_output(output: &str) -> Option<&str> {
     let line = output.lines().find(|line| !line.trim().is_empty())?.trim();
-    let version = line.strip_prefix("anvl ")?;
+    let version = line.strip_prefix("conduit ")?;
     Some(version.strip_prefix('v').unwrap_or(version))
 }
 
-fn read_anvl_version(path: &Path) -> Result<String> {
+fn read_conduit_version(path: &Path) -> Result<String> {
     let output = OsCommand::new(path)
         .arg("--version")
         .output()
@@ -456,7 +456,7 @@ fn read_anvl_version(path: &Path) -> Result<String> {
         ));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_anvl_version_output(&stdout)
+    parse_conduit_version_output(&stdout)
         .map(ToOwned::to_owned)
         .ok_or_else(|| {
             anyhow!(
@@ -526,7 +526,7 @@ fn session_socket_dir() -> Result<PathBuf> {
     } else {
         return Err(anyhow!("cannot determine config directory"));
     };
-    Ok(base.join("anvl").join("sessions"))
+    Ok(base.join("conduit").join("sessions"))
 }
 
 fn session_socket_path(name: &str) -> Result<PathBuf> {
@@ -769,7 +769,7 @@ async fn run_daemon(name: &str) -> Result<()> {
                     }
                     Err(RecvError::Closed) => break,
                     Err(RecvError::Lagged(n)) => {
-                        eprintln!("[anvl] event recorder lagged by {n} events");
+                        eprintln!("[conduit] event recorder lagged by {n} events");
                         continue;
                     }
                 }
@@ -836,7 +836,7 @@ async fn run_daemon(name: &str) -> Result<()> {
                         }
                         Err(RecvError::Closed) => break,
                         Err(RecvError::Lagged(n)) => {
-                            eprintln!("[anvl] client event forwarder lagged by {n} events");
+                            eprintln!("[conduit] client event forwarder lagged by {n} events");
                             continue;
                         }
                     }
@@ -999,7 +999,7 @@ fn list_sessions() -> Result<()> {
 fn spawn_daemon_process(name: &str) -> Result<u32> {
     let exe = std::env::current_exe()?;
     let child = OsCommand::new(exe)
-        .env("ANVL_SESSION_NAME", name)
+        .env("CONDUIT_SESSION_NAME", name)
         .arg("--run-daemon")
         .arg("--session-name")
         .arg(name)
@@ -1052,7 +1052,7 @@ fn session_registry_path() -> Option<PathBuf> {
     } else {
         return None;
     };
-    Some(base.join("anvl").join("sessions.json"))
+    Some(base.join("conduit").join("sessions.json"))
 }
 
 fn session_workspaces_persist_path(name: &str) -> Option<PathBuf> {
@@ -1061,7 +1061,7 @@ fn session_workspaces_persist_path(name: &str) -> Option<PathBuf> {
     Some(
         PathBuf::from(home)
             .join(".config")
-            .join("anvl")
+            .join("conduit")
             .join(format!("workspaces.{safe}.json")),
     )
 }
@@ -3033,16 +3033,16 @@ mod tests {
 
     #[test]
     fn parses_version_output() {
-        assert_eq!(parse_anvl_version_output("anvl 0.3.21\n"), Some("0.3.21"));
+        assert_eq!(parse_conduit_version_output("conduit 0.3.21\n"), Some("0.3.21"));
         assert_eq!(
-            parse_anvl_version_output("\nanvl v0.3.21\n"),
+            parse_conduit_version_output("\nconduit v0.3.21\n"),
             Some("0.3.21")
         );
     }
 
     #[test]
     fn rejects_unexpected_version_output() {
-        assert_eq!(parse_anvl_version_output("0.3.21\n"), None);
+        assert_eq!(parse_conduit_version_output("0.3.21\n"), None);
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use tempfile::TempDir;
 
-use anvl_core::{spawn_core, workspace::git::refresh_git};
+use conduit_core::{spawn_core, workspace::git::refresh_git};
 use protocol::{Command as CoreCommand, Event as CoreEvent, SshTarget};
 
 static SSH_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -87,7 +87,7 @@ fn write_fake_ssh_script(dir: &Path) -> PathBuf {
     std::fs::write(
         &path,
         r#"#!/bin/sh
-mode="${ANVL_FAKE_SSH_MODE:-ok}"
+mode="${CONDUIT_FAKE_SSH_MODE:-ok}"
 last=""
 for arg in "$@"; do
   last="$arg"
@@ -137,8 +137,8 @@ async fn refresh_git_over_fake_ssh_clean_repo() {
     git_add_all(repo.path());
     git_commit(repo.path(), "initial commit");
 
-    let _ssh_bin = EnvVarGuard::set("ANVL_SSH_BIN", fake_ssh.display().to_string());
-    let _fake_mode = EnvVarGuard::set("ANVL_FAKE_SSH_MODE", "ok");
+    let _ssh_bin = EnvVarGuard::set("CONDUIT_SSH_BIN", fake_ssh.display().to_string());
+    let _fake_mode = EnvVarGuard::set("CONDUIT_FAKE_SSH_MODE", "ok");
     let _shell = EnvVarGuard::set("SHELL", "/bin/bash");
 
     let state = refresh_git(repo.path(), Some(&fake_target()))
@@ -176,8 +176,8 @@ async fn refresh_git_over_fake_ssh_preserves_changed_paths_and_branch_names() {
         "modified",
     );
 
-    let _ssh_bin = EnvVarGuard::set("ANVL_SSH_BIN", fake_ssh.display().to_string());
-    let _fake_mode = EnvVarGuard::set("ANVL_FAKE_SSH_MODE", "ok");
+    let _ssh_bin = EnvVarGuard::set("CONDUIT_SSH_BIN", fake_ssh.display().to_string());
+    let _fake_mode = EnvVarGuard::set("CONDUIT_FAKE_SSH_MODE", "ok");
     let _shell = EnvVarGuard::set("SHELL", "/bin/bash");
 
     let state = refresh_git(repo.path(), Some(&fake_target()))
@@ -227,8 +227,8 @@ async fn refresh_git_over_fake_ssh_matches_local_changed_statuses() {
         "unstaged-change",
     );
 
-    let _ssh_bin = EnvVarGuard::set("ANVL_SSH_BIN", fake_ssh.display().to_string());
-    let _fake_mode = EnvVarGuard::set("ANVL_FAKE_SSH_MODE", "ok");
+    let _ssh_bin = EnvVarGuard::set("CONDUIT_SSH_BIN", fake_ssh.display().to_string());
+    let _fake_mode = EnvVarGuard::set("CONDUIT_FAKE_SSH_MODE", "ok");
     let _shell = EnvVarGuard::set("SHELL", "/bin/bash");
 
     let local = refresh_git(repo.path(), None).await.unwrap();
@@ -257,8 +257,8 @@ async fn refresh_git_over_fake_ssh_reports_transport_failure() {
     let fake_bin_dir = TempDir::new().unwrap();
     let fake_ssh = write_fake_ssh_script(fake_bin_dir.path());
 
-    let _ssh_bin = EnvVarGuard::set("ANVL_SSH_BIN", fake_ssh.display().to_string());
-    let _fake_mode = EnvVarGuard::set("ANVL_FAKE_SSH_MODE", "fail");
+    let _ssh_bin = EnvVarGuard::set("CONDUIT_SSH_BIN", fake_ssh.display().to_string());
+    let _fake_mode = EnvVarGuard::set("CONDUIT_FAKE_SSH_MODE", "fail");
     let _shell = EnvVarGuard::set("SHELL", "/bin/bash");
 
     let err = refresh_git(repo.path(), Some(&fake_target()))
@@ -275,8 +275,8 @@ async fn refresh_git_over_fake_ssh_reports_incomplete_output() {
     let fake_bin_dir = TempDir::new().unwrap();
     let fake_ssh = write_fake_ssh_script(fake_bin_dir.path());
 
-    let _ssh_bin = EnvVarGuard::set("ANVL_SSH_BIN", fake_ssh.display().to_string());
-    let _fake_mode = EnvVarGuard::set("ANVL_FAKE_SSH_MODE", "truncate");
+    let _ssh_bin = EnvVarGuard::set("CONDUIT_SSH_BIN", fake_ssh.display().to_string());
+    let _fake_mode = EnvVarGuard::set("CONDUIT_FAKE_SSH_MODE", "truncate");
     let _shell = EnvVarGuard::set("SHELL", "/bin/bash");
 
     let err = refresh_git(repo.path(), Some(&fake_target()))
@@ -294,8 +294,8 @@ async fn add_workspace_over_ssh_is_not_blocked_by_noninteractive_auth_failure() 
     let fake_ssh = write_fake_ssh_script(fake_bin_dir.path());
     let fake_home = TempDir::new().unwrap();
 
-    let _ssh_bin = EnvVarGuard::set("ANVL_SSH_BIN", fake_ssh.display().to_string());
-    let _fake_mode = EnvVarGuard::set("ANVL_FAKE_SSH_MODE", "fail");
+    let _ssh_bin = EnvVarGuard::set("CONDUIT_SSH_BIN", fake_ssh.display().to_string());
+    let _fake_mode = EnvVarGuard::set("CONDUIT_FAKE_SSH_MODE", "fail");
     let _shell = EnvVarGuard::set("SHELL", "/bin/bash");
     let _home = EnvVarGuard::set("HOME", fake_home.path().display().to_string());
 

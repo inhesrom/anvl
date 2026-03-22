@@ -2,15 +2,15 @@
 
 ## Project Overview
 
-Anvl is a terminal-based multi-workspace manager built in Rust. It provides embedded terminal sessions (agent + shell tabs) with Git integration, attention detection, and session persistence via a daemon/attach model.
+Conduit is a terminal-based multi-workspace manager built in Rust. It provides embedded terminal sessions (agent + shell tabs) with Git integration, attention detection, and session persistence via a daemon/attach model.
 
 ## Architecture
 
 Cargo workspace with three crates:
 
 - **`crates/protocol`** — Serializable IPC types: workspace routing, attention levels, terminal kinds, command/event enums. Pure data types with serde, no business logic.
-- **`crates/core`** (`anvl_core`) — Application state: workspaces, Git operations, PTY spawning, attention detection, SSH, and the async event loop. Uses `portable-pty` for terminal management and `tokio` for async.
-- **`crates/tui`** — Terminal UI binary (`anvl`). Built with Ratatui/crossterm. Renders home and workspace screens, handles keyboard/mouse input, manages sessions. Contains `ui/` (rendering) and `keymap.rs` (input handling).
+- **`crates/core`** (`conduit_core`) — Application state: workspaces, Git operations, PTY spawning, attention detection, SSH, and the async event loop. Uses `portable-pty` for terminal management and `tokio` for async.
+- **`crates/tui`** — Terminal UI binary (`conduit`). Built with Ratatui/crossterm. Renders home and workspace screens, handles keyboard/mouse input, manages sessions. Contains `ui/` (rendering) and `keymap.rs` (input handling).
 
 Dependency chain: `tui` → `core` → `protocol`
 
@@ -53,7 +53,7 @@ No test suite currently. Verify changes by building and running the TUI manually
 
 ## Configuration
 
-Config lives under `~/.config/anvl/` (respects `XDG_CONFIG_HOME`):
+Config lives under `~/.config/conduit/` (respects `XDG_CONFIG_HOME`):
 - `sessions.json` — session registry
 - `workspaces.json` — default workspace persistence
 - `workspaces.<session-name>.json` — per-session workspace state
@@ -62,7 +62,7 @@ Config lives under `~/.config/anvl/` (respects `XDG_CONFIG_HOME`):
 
 | Variable | Description | Default |
 |---|---|---|
-| `ANVL_WEB_PORT` | Embedded web server port | `3001` |
-| `ANVL_DISABLE_EMBEDDED_WEB` | Disable embedded web server | — |
-| `ANVL_SESSION_NAME` | Passed to daemon subprocess | — |
+| `CONDUIT_WEB_PORT` | Embedded web server port | `3001` |
+| `CONDUIT_DISABLE_EMBEDDED_WEB` | Disable embedded web server | — |
+| `CONDUIT_SESSION_NAME` | Passed to daemon subprocess | — |
 | `SHELL` | Shell for terminal sessions | `zsh` |

@@ -90,7 +90,7 @@ fn render_dashboard(frame: &mut Frame, area: Rect, app: &TuiApp) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .title_top(Line::from(Span::styled(
-                " ANVL ",
+                " CONDUIT",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),

@@ -1,4 +1,4 @@
-# Anvl
+# Conduit
 
 <video src="https://github.com/user-attachments/assets/fbc7da6f-0f79-4cad-ab20-b997c3dd119f" controls width="600"></video>
 
@@ -16,7 +16,7 @@ A terminal-based multi-workspace manager built with Rust.
 
 ## Architecture
 
-Anvl is organized as a Cargo workspace with three crates:
+Conduit is organized as a Cargo workspace with three crates:
 
 | Crate | Description |
 |---|---|
@@ -24,21 +24,21 @@ Anvl is organized as a Cargo workspace with three crates:
 | `core` | Application state management — workspaces, Git, terminal PTY spawning, attention detection, SSH, and the async event loop |
 | `tui` | Terminal UI built with Ratatui — renders home/workspace screens, handles input, and manages sessions |
 
-See [docs/repo-diagram.md](/Users/ianhersom/repo/anvl/docs/repo-diagram.md) for a rendered repo diagram and runtime overview.
+See [docs/repo-diagram.md](/home/ianhersom/repo/conduit/docs/repo-diagram.md) for a rendered repo diagram and runtime overview.
 
 ## Getting Started
 
 ### Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/inhesrom/anvl/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/inhesrom/conduit/master/install.sh | bash
 ```
 
 Prebuilt binaries are available for:
 - macOS (Apple Silicon)
 - Linux (x86_64)
 
-The installer places the `anvl` binary in `~/.local/bin`. Override with `ANVL_INSTALL_DIR`.
+The installer places the `conduit` binary in `~/.local/bin`. Override with `CONDUIT_INSTALL_DIR`.
 
 ### Build from source
 
@@ -57,18 +57,18 @@ cargo build --release
 ```sh
 cargo run
 # or
-./target/release/anvl
+./target/release/conduit
 ```
 
 ## Usage
 
 ```
-anvl                    Local mode (no session)
-anvl -s <name>          Create and start a named session
-anvl -a <name>          Attach to an existing session
-anvl -l                 List sessions
-anvl -r <name>          Remove a session
-anvl -d                 Detach (use with -s or -a)
+conduit                    Local mode (no session)
+conduit -s <name>          Create and start a named session
+conduit -a <name>          Attach to an existing session
+conduit -l                 List sessions
+conduit -r <name>          Remove a session
+conduit -d                 Detach (use with -s or -a)
 ```
 
 ## Key Bindings
@@ -113,13 +113,13 @@ anvl -d                 Detach (use with -s or -a)
 
 | Variable | Description | Default |
 |---|---|---|
-| `ANVL_WEB_PORT` | Embedded web server port | `3001` |
-| `ANVL_DISABLE_EMBEDDED_WEB` | Disable the embedded web server if set | — |
+| `CONDUIT_WEB_PORT` | Embedded web server port | `3001` |
+| `CONDUIT_DISABLE_EMBEDDED_WEB` | Disable the embedded web server if set | — |
 | `SHELL` | Shell used for terminal sessions | `zsh` |
 
 ### Config Paths
 
-Anvl stores configuration under `~/.config/anvl/` (respects `XDG_CONFIG_HOME`):
+Conduit stores configuration under `~/.config/conduit/` (respects `XDG_CONFIG_HOME`):
 
 - `sessions.json` — session registry
 - `workspaces.json` — default workspace persistence

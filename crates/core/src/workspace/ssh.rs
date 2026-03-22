@@ -74,7 +74,7 @@ fn control_socket_path(target: &SshTarget) -> String {
     target.user.hash(&mut hasher);
     target.port.hash(&mut hasher);
     let hash = hasher.finish();
-    format!("/tmp/anvl-ssh-{:x}", hash)
+    format!("/tmp/conduit-ssh-{:x}", hash)
 }
 
 /// Appends common SSH arguments (ControlMaster, port) to a command.
@@ -89,7 +89,7 @@ fn append_ssh_args(cmd: &mut Command, target: &SshTarget) {
 }
 
 /// Delimiter used to separate output sections in a batched SSH command.
-pub const BATCH_DELIM: &str = "---ANVL_BATCH_DELIM---";
+pub const BATCH_DELIM: &str = "---CONDUIT_BATCH_DELIM---";
 
 /// Builds a single SSH `Command` that runs multiple shell commands on the remote,
 /// separated by `BATCH_DELIM` markers so the caller can split the combined stdout.
@@ -134,7 +134,7 @@ pub fn ssh_args_for_terminal(target: &SshTarget, cwd: &Path) -> Vec<String> {
 }
 
 fn ssh_program() -> String {
-    std::env::var("ANVL_SSH_BIN").unwrap_or_else(|_| "ssh".to_string())
+    std::env::var("CONDUIT_SSH_BIN").unwrap_or_else(|_| "ssh".to_string())
 }
 
 fn remote_command(cwd: &Path, program: &str, args: &[&str]) -> String {
@@ -258,7 +258,7 @@ mod tests {
             user: None,
             port: None,
         };
-        assert!(control_socket_path(&t).starts_with("/tmp/anvl-ssh-"));
+        assert!(control_socket_path(&t).starts_with("/tmp/conduit-ssh-"));
     }
 
     #[test]

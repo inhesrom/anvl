@@ -1,8 +1,8 @@
 #!/bin/sh
 set -e
 
-REPO="inhesrom/anvl"
-INSTALL_DIR="${ANVL_INSTALL_DIR:-$HOME/.local/bin}"
+REPO="inhesrom/conduit"
+INSTALL_DIR="${CONDUIT_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -38,21 +38,21 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
-URL="https://github.com/${REPO}/releases/download/${VERSION}/anvl-${TARGET}.tar.gz"
+URL="https://github.com/${REPO}/releases/download/${VERSION}/conduit-${TARGET}.tar.gz"
 
-echo "Installing anvl ${VERSION} for ${TARGET}..."
+echo "Installing conduit ${VERSION} for ${TARGET}..."
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-curl -fsSL "$URL" -o "$TMPDIR/anvl.tar.gz"
-tar xzf "$TMPDIR/anvl.tar.gz" -C "$TMPDIR"
+curl -fsSL "$URL" -o "$TMPDIR/conduit.tar.gz"
+tar xzf "$TMPDIR/conduit.tar.gz" -C "$TMPDIR"
 
 mkdir -p "$INSTALL_DIR"
-mv "$TMPDIR/anvl" "$INSTALL_DIR/anvl"
-chmod +x "$INSTALL_DIR/anvl"
+mv "$TMPDIR/conduit" "$INSTALL_DIR/conduit"
+chmod +x "$INSTALL_DIR/conduit"
 
-echo "Installed anvl ${VERSION} to ${INSTALL_DIR}/anvl"
+echo "Installed conduit ${VERSION} to ${INSTALL_DIR}/conduit"
 
 case ":$PATH:" in
   *":${INSTALL_DIR}:"*) ;;
